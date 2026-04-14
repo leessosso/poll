@@ -1,16 +1,21 @@
 import { useState } from 'react';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { PollType } from '../types';
+import type { Poll, PollType } from '../types';
 
 interface CreatePollFormProps {
   onClose: () => void;
+  editPoll?: Poll;
 }
 
-export default function CreatePollForm({ onClose }: CreatePollFormProps) {
-  const [title, setTitle] = useState('');
-  const [type, setType] = useState<PollType>('yesno');
-  const [options, setOptions] = useState(['', '']);
+export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProps) {
+  const isEdit = !!editPoll;
+
+  const [title, setTitle] = useState(editPoll?.title ?? '');
+  const [type, setType] = useState<PollType>(editPoll?.type ?? 'yesno');
+  const [options, setOptions] = useState<string[]>(
+    editPoll?.type === 'choice' ? editPoll.options : ['', '']
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,15 +32,25 @@ export default function CreatePollForm({ onClose }: CreatePollFormProps) {
     setLoading(true);
     setError('');
     try {
-      await addDoc(collection(db, 'polls'), {
-        title: title.trim(),
-        type,
-        options: type === 'yesno' ? ['찬성', '반대'] : options.map((o) => o.trim()),
-        status: 'waiting',
-        createdAt: Date.now(),
-        results: {},
-        showResults: false,
-      });
+      const finalOptions = type === 'yesno' ? ['찬성', '반대'] : options.map((o) => o.trim());
+
+      if (isEdit && editPoll) {
+        await updateDoc(doc(db, 'polls', editPoll.id), {
+          title: title.trim(),
+          type,
+          options: finalOptions,
+        });
+      } else {
+        await addDoc(collection(db, 'polls'), {
+          title: title.trim(),
+          type,
+          options: finalOptions,
+          status: 'waiting',
+          createdAt: Date.now(),
+          results: {},
+          showResults: false,
+        });
+      }
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -49,7 +64,9 @@ export default function CreatePollForm({ onClose }: CreatePollFormProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
-        <h2 className="text-xl font-bold text-gray-800 mb-5">새 투표 만들기</h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-5">
+          {isEdit ? '투표 수정' : '새 투표 만들기'}
+        </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">투표 주제</label>
@@ -146,7 +163,7 @@ export default function CreatePollForm({ onClose }: CreatePollFormProps) {
               disabled={loading}
               className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50"
             >
-              {loading ? '생성 중...' : '만들기'}
+              {loading ? (isEdit ? '저장 중...' : '생성 중...') : isEdit ? '저장' : '만들기'}
             </button>
           </div>
         </form>

@@ -70,6 +70,7 @@ function AdminDashboard() {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [presenceCount, setPresenceCount] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -159,6 +160,7 @@ function AdminDashboard() {
                   expanded={expandedId === poll.id}
                   onToggle={() => setExpandedId(expandedId === poll.id ? null : poll.id)}
                   onActivate={() => activatePoll(poll)}
+                  onEdit={() => setEditingPoll(poll)}
                   onDelete={deletePoll}
                   onToggleResults={toggleResults}
                 />
@@ -196,6 +198,9 @@ function AdminDashboard() {
       </main>
 
       {showCreate && <CreatePollForm onClose={() => setShowCreate(false)} />}
+      {editingPoll && (
+        <CreatePollForm editPoll={editingPoll} onClose={() => setEditingPoll(null)} />
+      )}
     </div>
   );
 }
@@ -205,6 +210,7 @@ interface PollAdminCardProps {
   expanded: boolean;
   onToggle: () => void;
   onActivate?: () => void;
+  onEdit?: () => void;
   onClose?: (poll: Poll) => void;
   onDelete: (poll: Poll) => void;
   onToggleResults: (poll: Poll) => void;
@@ -215,6 +221,7 @@ function PollAdminCard({
   expanded,
   onToggle,
   onActivate,
+  onEdit,
   onClose,
   onDelete,
   onToggleResults,
@@ -263,6 +270,14 @@ function PollAdminCard({
                 className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600"
               >
                 투표 시작
+              </button>
+            )}
+            {poll.status === 'waiting' && onEdit && (
+              <button
+                onClick={onEdit}
+                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-300 rounded-lg text-sm font-medium hover:bg-indigo-50"
+              >
+                수정
               </button>
             )}
             {poll.status === 'active' && onClose && (
