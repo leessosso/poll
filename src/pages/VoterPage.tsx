@@ -1,6 +1,14 @@
-import { useEffect, useState, useRef } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, runTransaction } from 'firebase/firestore';
-import { ref, push, onDisconnect, remove } from 'firebase/database';
+import { useEffect, useState } from 'react';
+import { collection, query, orderBy, onSnapshot, doc, runTransaction as runFirestoreTransaction } from 'firebase/firestore';
+import {
+  ref,
+  onDisconnect,
+  remove,
+  runTransaction as runRtdbTransaction,
+  update,
+  onValue,
+  set,
+} from 'firebase/database';
 import { db, rtdb } from '../lib/firebase';
 import type { Poll } from '../types';
 import ResultsBar from '../components/ResultsBar';
@@ -18,19 +26,88 @@ function markVoted(pollId: string) {
   localStorage.setItem(`voted_${pollId}`, 'true');
 }
 
+function getClientId(): string {
+  const storageKey = 'church_vote_client_id';
+  const existingId = localStorage.getItem(storageKey);
+  if (existingId) return existingId;
+
+  const generatedId = `client_${crypto.randomUUID()}`;
+  localStorage.setItem(storageKey, generatedId);
+  return generatedId;
+}
+
+function getSessionId(): string {
+  const storageKey = 'church_vote_session_id';
+  const existingId = sessionStorage.getItem(storageKey);
+  if (existingId) return existingId;
+
+  const generatedId = `session_${crypto.randomUUID()}`;
+  sessionStorage.setItem(storageKey, generatedId);
+  return generatedId;
+}
+
 export default function VoterPage() {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [votingFor, setVotingFor] = useState<string | null>(null);
-  const presenceRefPath = useRef<string | null>(null);
 
   useEffect(() => {
-    const presenceRef = push(ref(rtdb, 'presence'), { connectedAt: Date.now() });
-    presenceRefPath.current = presenceRef.key;
-    onDisconnect(presenceRef).remove();
+    const now = Date.now();
+    const clientId = getClientId();
+    const sessionId = getSessionId();
+    const visitorRef = ref(rtdb, `visitors/${clientId}`);
+    const presenceRef = ref(rtdb, `presence/${sessionId}`);
+    const connectedRef = ref(rtdb, '.info/connected');
+
+    void runRtdbTransaction(visitorRef, (current) => {
+      if (current) {
+        return {
+          ...current,
+          lastSeenAt: now,
+          visitCount: (current.visitCount ?? 0) + 1,
+        };
+      }
+
+      return {
+        firstSeenAt: now,
+        lastSeenAt: now,
+        visitCount: 1,
+      };
+    });
+
+    const registerPresence = async () => {
+      try {
+        await onDisconnect(presenceRef).remove();
+        await set(presenceRef, {
+          clientId,
+          connectedAt: Date.now(),
+          lastSeenAt: Date.now(),
+        });
+      } catch (err) {
+        console.error('presence registration failed', err);
+      }
+    };
+
+    const unsubConnected = onValue(connectedRef, (snap) => {
+      if (snap.val() !== true) return;
+      void registerPresence();
+    });
+
+    const touchVisitor = () => {
+      const ts = Date.now();
+      void update(visitorRef, { lastSeenAt: ts });
+      void update(presenceRef, { lastSeenAt: ts });
+    };
+    const visibilityHandler = () => touchVisitor();
+    const intervalId = window.setInterval(touchVisitor, 30000);
+    document.addEventListener('visibilitychange', visibilityHandler);
 
     return () => {
-      remove(presenceRef);
+      unsubConnected();
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      touchVisitor();
+      void remove(presenceRef);
     };
   }, []);
 
@@ -49,7 +126,7 @@ export default function VoterPage() {
     setVotingFor(poll.id);
     try {
       const pollRef = doc(db, 'polls', poll.id);
-      await runTransaction(db, async (tx) => {
+      await runFirestoreTransaction(db, async (tx) => {
         const snap = await tx.get(pollRef);
         if (!snap.exists()) return;
         const current = snap.data().results ?? {};

@@ -17,13 +17,11 @@ import CreatePollForm from '../components/CreatePollForm';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? 'admin1234';
 
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
+  const [authed, setAuthed] = useState(
+    () => sessionStorage.getItem('admin_authed') === 'true',
+  );
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (sessionStorage.getItem('admin_authed') === 'true') setAuthed(true);
-  }, []);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +67,7 @@ export default function AdminPage() {
 function AdminDashboard() {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [presenceCount, setPresenceCount] = useState(0);
+  const [visitorCount, setVisitorCount] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -85,6 +84,14 @@ function AdminDashboard() {
     const presenceRef = ref(rtdb, 'presence');
     const unsub = onValue(presenceRef, (snap) => {
       setPresenceCount(snap.exists() ? Object.keys(snap.val()).length : 0);
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    const visitorsRef = ref(rtdb, 'visitors');
+    const unsub = onValue(visitorsRef, (snap) => {
+      setVisitorCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
     return unsub;
   }, []);
@@ -119,7 +126,9 @@ function AdminDashboard() {
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
         <div className="flex items-center gap-2 bg-indigo-700 rounded-full px-3 py-1">
           <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-          <span className="text-sm font-medium">{presenceCount}명 접속 중</span>
+          <span className="text-sm font-medium">
+            진입 {visitorCount}명 · 현재 {presenceCount}명
+          </span>
         </div>
       </header>
 
