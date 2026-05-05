@@ -1,0 +1,26 @@
+---
+description: Apply React View Transition patterns for route and state animations
+globs: **/*.{tsx,jsx,ts,js,css}
+alwaysApply: false
+---
+
+# React View Transitions
+
+When implementing UI/page transitions in React, first use:
+
+`~/.cursor/skills/react-view-transitions/SKILL.md`
+
+Follow the implementation flow in `references/implementation.md` and reuse
+animation recipes from `references/css-recipes.md`.
+
+Apply the highest-value patterns that fit the feature:
+- Shared element transitions with stable `name` identity.
+- Suspense reveal transitions for loading to content swaps.
+- List identity transitions via stable per-item `key`.
+- Enter/exit transitions for appearing/disappearing UI.
+- Route-level transitions for navigation context.
+
+Prefer `default="none"` and explicitly opt into needed triggers to avoid
+unintended global cross-fades.
+
+When reporting changes, mention which transition patterns were applied.

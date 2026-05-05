@@ -1,0 +1,23 @@
+---
+description: Review web UI work against Vercel Web Interface Guidelines
+globs: **/*.{tsx,jsx,ts,js,css,scss,html,mdx}
+alwaysApply: false
+---
+
+# Web Design Guidelines
+
+When reviewing or polishing web UI, first use:
+
+`~/.cursor/skills/web-design-guidelines/SKILL.md`
+
+Before review, fetch the latest guidelines from:
+
+`https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md`
+
+Then evaluate relevant files for:
+- Accessibility and semantic structure.
+- Interaction clarity and UX consistency.
+- Visual hierarchy, readability, and responsive behavior.
+- Common anti-patterns called out by the guideline source.
+
+Report findings in concise `file:line` style when a review is requested.

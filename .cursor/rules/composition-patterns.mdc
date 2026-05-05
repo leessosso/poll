@@ -1,0 +1,22 @@
+---
+description: Apply React composition patterns for scalable component APIs
+globs: **/*.{tsx,jsx,ts,js}
+alwaysApply: false
+---
+
+# React Composition Patterns
+
+When designing or refactoring React component APIs, first use:
+
+`~/.cursor/skills/composition-patterns/SKILL.md`
+
+Apply relevant `rules/` guidance with priority on:
+- Avoid boolean-prop proliferation for behavior modes.
+- Prefer composition and compound components over monolithic prop APIs.
+- Lift shared state into provider boundaries when siblings need coordination.
+- Keep state interfaces generic and decoupled from implementation details.
+- Prefer explicit variant components and `children` composition over renderX props.
+
+If React 19 APIs are in scope, apply only React 19-specific rules.
+
+When reporting changes, mention which composition rules were applied.
