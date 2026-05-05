@@ -1,4 +1,4 @@
-# 2청년회 총회 투표 시스템
+# 등촌교회 2층년회 투표 시스템
 
 실시간 익명 투표 시스템 (React + Firebase + GitHub Pages)
 

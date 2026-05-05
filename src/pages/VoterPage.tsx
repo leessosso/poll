@@ -23,7 +23,7 @@ export default function VoterPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-indigo-600 text-white px-5 py-4 shadow">
-        <h1 className="text-lg font-bold">2청년회 총회 투표</h1>
+        <h1 className="text-lg font-bold">등촌교회 2층년회 투표 시스템</h1>
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6">

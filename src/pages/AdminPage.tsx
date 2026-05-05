@@ -31,7 +31,7 @@ export default function AdminPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
         <div className="bg-white rounded-2xl shadow-sm p-8 w-full max-w-sm">
           <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">관리자 로그인</h1>
-          <p className="text-gray-400 text-sm text-center mb-6">2청년회 총회 투표 관리</p>
+          <p className="text-gray-400 text-sm text-center mb-6">등촌교회 2층년회 투표 관리</p>
           <form onSubmit={handleLogin} className="space-y-4">
             <input
               type="password"
