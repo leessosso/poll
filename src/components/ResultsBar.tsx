@@ -1,17 +1,13 @@
+import { getOptions, getPollTotal } from '../lib/poll-utils';
 import type { Poll } from '../types';
 
 interface ResultsBarProps {
   poll: Poll;
 }
 
-function getOptions(poll: Poll): string[] {
-  if (poll.type === 'yesno') return ['찬성', '반대'];
-  return poll.options;
-}
-
 export default function ResultsBar({ poll }: ResultsBarProps) {
   const options = getOptions(poll);
-  const total = options.reduce((sum, opt) => sum + (poll.results[opt] ?? 0), 0);
+  const total = getPollTotal(poll);
 
   return (
     <div className="space-y-3">

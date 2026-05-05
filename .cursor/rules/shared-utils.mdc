@@ -1,0 +1,39 @@
+---
+description: 공유 유틸 함수 위치 및 중복 제거 규칙
+globs: src/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# 공유 유틸 규칙
+
+## Poll 유틸 함수는 src/lib/poll-utils.ts 에 위치
+
+`getOptions`, `hasVoted`, `markVoted`, `getClientId`, `getSessionId` 같이 여러 파일에서
+쓰이는 함수는 각 파일 상단에 중복 정의하지 않는다.
+
+```ts
+// src/lib/poll-utils.ts
+export function getOptions(poll: Poll): string[] {
+  if (poll.type === 'yesno') return ['찬성', '반대'];
+  return poll.options;
+}
+
+export function hasVoted(pollId: string): boolean {
+  return localStorage.getItem(`voted_${pollId}`) === 'true';
+}
+```
+
+## getOptions 중복 금지
+
+`getOptions`는 `ResultsBar.tsx`와 `VoterPage.tsx`에 현재 동일하게 중복 정의되어 있다.
+`src/lib/poll-utils.ts`로 이동하고 import해서 사용한다.
+
+## 클라이언트 ID / 세션 ID
+
+`getClientId`, `getSessionId`는 `src/lib/client-id.ts` 또는 `src/lib/poll-utils.ts`에서 export한다.
+컴포넌트/훅에서는 직접 `localStorage`를 건드리지 않는다.
+
+## poll.results 접근 방어
+
+`poll.results[opt]`는 항상 `poll.results?.[opt] ?? 0`으로 접근한다.
+Firestore에 오래된 문서가 있을 경우 `results` 필드가 없을 수 있다.

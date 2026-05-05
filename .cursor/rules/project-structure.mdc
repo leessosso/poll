@@ -1,0 +1,45 @@
+---
+description: 파일 구조 및 컴포넌트 배치 규칙
+globs: src/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# 프로젝트 구조 규칙
+
+## 디렉터리 구조
+
+```
+src/
+  pages/        # 라우트 단위 페이지 컴포넌트만 (데이터 패칭 훅 호출 → 렌더링)
+  components/   # 재사용 가능한 UI 컴포넌트
+  hooks/        # 커스텀 훅 (Firebase 구독, 상태 조합 등)
+  lib/          # 유틸 함수, Firebase 초기화, mapper, 공유 로직
+  types/        # TypeScript 타입 정의
+```
+
+## 컴포넌트는 페이지 파일 내에 정의하지 않는다
+
+페이지 파일 하단에 `function PollAdminCard`, `function ActivePollCard` 등을 정의하지 않는다.
+컴포넌트는 `src/components/` 아래 별도 파일에 위치시킨다.
+
+```tsx
+// BAD - AdminPage.tsx 하단에 컴포넌트 정의
+function PollAdminCard({ poll }: PollAdminCardProps) { ... }
+
+// GOOD - src/components/PollAdminCard.tsx 로 분리
+export default function PollAdminCard({ poll }: PollAdminCardProps) { ... }
+```
+
+## 페이지 컴포넌트의 역할
+
+페이지 파일은 훅 호출과 레이아웃 조합만 담당한다. 비즈니스 로직과 Firebase 호출은 훅/유틸로 위임한다.
+
+```tsx
+// GOOD - VoterPage.tsx
+export default function VoterPage() {
+  const polls = usePolls();
+  usePresence();
+  const { handleVote, votingFor } = useVote();
+  // 렌더링만
+}
+```

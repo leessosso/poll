@@ -1,17 +1,10 @@
-import { useEffect, useState } from 'react';
-import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
-  deleteDoc,
-} from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
-import { db, rtdb } from '../lib/firebase';
+import { useState } from 'react';
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { usePolls } from '../hooks/usePolls';
+import { usePresenceStats } from '../hooks/usePresenceStats';
 import type { Poll } from '../types';
-import ResultsBar from '../components/ResultsBar';
+import PollAdminCard from '../components/PollAdminCard';
 import CreatePollForm from '../components/CreatePollForm';
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? 'admin1234';
@@ -65,38 +58,15 @@ export default function AdminPage() {
 }
 
 function AdminDashboard() {
-  const [polls, setPolls] = useState<Poll[]>([]);
-  const [presenceCount, setPresenceCount] = useState(0);
-  const [visitorCount, setVisitorCount] = useState(0);
+  const { polls } = usePolls();
+  const { presenceCount, visitorCount } = usePresenceStats();
   const [showCreate, setShowCreate] = useState(false);
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const q = query(collection(db, 'polls'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      setPolls(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Poll)));
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const presenceRef = ref(rtdb, 'presence');
-    const unsub = onValue(presenceRef, (snap) => {
-      setPresenceCount(snap.exists() ? Object.keys(snap.val()).length : 0);
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const visitorsRef = ref(rtdb, 'visitors');
-    const unsub = onValue(visitorsRef, (snap) => {
-      setVisitorCount(snap.exists() ? Object.keys(snap.val()).length : 0);
-    });
-    return unsub;
-  }, []);
-
   const activePoll = polls.find((p) => p.status === 'active');
+  const waitingPolls = polls.filter((p) => p.status === 'waiting');
+  const closedPolls = polls.filter((p) => p.status === 'closed');
 
   const activatePoll = async (poll: Poll) => {
     if (activePoll && activePoll.id !== poll.id) {
@@ -117,8 +87,8 @@ function AdminDashboard() {
   const toggleResults = (poll: Poll) =>
     updateDoc(doc(db, 'polls', poll.id), { showResults: !poll.showResults });
 
-  const waitingPolls = polls.filter((p) => p.status === 'waiting');
-  const closedPolls = polls.filter((p) => p.status === 'closed');
+  const toggleExpanded = (id: string) =>
+    setExpandedId((prev) => (prev === id ? null : id));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -148,7 +118,7 @@ function AdminDashboard() {
             <PollAdminCard
               poll={activePoll}
               expanded={expandedId === activePoll.id}
-              onToggle={() => setExpandedId(expandedId === activePoll.id ? null : activePoll.id)}
+              onToggle={() => toggleExpanded(activePoll.id)}
               onClose={closePoll}
               onDelete={deletePoll}
               onToggleResults={toggleResults}
@@ -167,7 +137,7 @@ function AdminDashboard() {
                   key={poll.id}
                   poll={poll}
                   expanded={expandedId === poll.id}
-                  onToggle={() => setExpandedId(expandedId === poll.id ? null : poll.id)}
+                  onToggle={() => toggleExpanded(poll.id)}
                   onActivate={() => activatePoll(poll)}
                   onEdit={() => setEditingPoll(poll)}
                   onDelete={deletePoll}
@@ -189,7 +159,7 @@ function AdminDashboard() {
                   key={poll.id}
                   poll={poll}
                   expanded={expandedId === poll.id}
-                  onToggle={() => setExpandedId(expandedId === poll.id ? null : poll.id)}
+                  onToggle={() => toggleExpanded(poll.id)}
                   onDelete={deletePoll}
                   onToggleResults={toggleResults}
                 />
@@ -209,114 +179,6 @@ function AdminDashboard() {
       {showCreate && <CreatePollForm onClose={() => setShowCreate(false)} />}
       {editingPoll && (
         <CreatePollForm editPoll={editingPoll} onClose={() => setEditingPoll(null)} />
-      )}
-    </div>
-  );
-}
-
-interface PollAdminCardProps {
-  poll: Poll;
-  expanded: boolean;
-  onToggle: () => void;
-  onActivate?: () => void;
-  onEdit?: () => void;
-  onClose?: (poll: Poll) => void;
-  onDelete: (poll: Poll) => void;
-  onToggleResults: (poll: Poll) => void;
-}
-
-function PollAdminCard({
-  poll,
-  expanded,
-  onToggle,
-  onActivate,
-  onEdit,
-  onClose,
-  onDelete,
-  onToggleResults,
-}: PollAdminCardProps) {
-  const statusColor = {
-    waiting: 'bg-yellow-100 text-yellow-700',
-    active: 'bg-green-100 text-green-700',
-    closed: 'bg-gray-100 text-gray-500',
-  }[poll.status];
-
-  const statusLabel = {
-    waiting: '대기 중',
-    active: '진행 중',
-    closed: '완료',
-  }[poll.status];
-
-  const total = Object.values(poll.results ?? {}).reduce((a, b) => a + b, 0);
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-      <button onClick={onToggle} className="w-full text-left px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full mb-1 ${statusColor}`}>
-              {statusLabel}
-            </span>
-            <p className="text-gray-800 font-semibold truncate">{poll.title}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {poll.type === 'yesno' ? '찬반' : `${poll.options.length}개 선택지`} · 총 {total}표
-            </p>
-          </div>
-          <span className="text-gray-400 mt-1">{expanded ? '▲' : '▼'}</span>
-        </div>
-      </button>
-
-      {expanded && (
-        <div className="px-5 pb-5 border-t border-gray-50 space-y-4">
-          <div className="pt-4">
-            <ResultsBar poll={poll} />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {poll.status === 'waiting' && onActivate && (
-              <button
-                onClick={onActivate}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600"
-              >
-                투표 시작
-              </button>
-            )}
-            {poll.status === 'waiting' && onEdit && (
-              <button
-                onClick={onEdit}
-                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-300 rounded-lg text-sm font-medium hover:bg-indigo-50"
-              >
-                수정
-              </button>
-            )}
-            {poll.status === 'active' && onClose && (
-              <button
-                onClick={() => onClose(poll)}
-                className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600"
-              >
-                투표 마감
-              </button>
-            )}
-            {(poll.status === 'active' || poll.status === 'closed') && (
-              <button
-                onClick={() => onToggleResults(poll)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  poll.showResults
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-indigo-600 border-indigo-300'
-                }`}
-              >
-                {poll.showResults ? '결과 공개 중' : '결과 공개'}
-              </button>
-            )}
-            <button
-              onClick={() => onDelete(poll)}
-              className="px-4 py-2 bg-white text-red-400 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50"
-            >
-              삭제
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );

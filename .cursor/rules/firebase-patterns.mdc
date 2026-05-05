@@ -1,0 +1,52 @@
+---
+description: Firebase Firestore/RTDB 구독과 데이터 매핑 패턴
+globs: **/*.{tsx,ts}
+alwaysApply: false
+---
+
+# Firebase 패턴
+
+## Firestore 구독은 커스텀 훅으로 분리
+
+컴포넌트 내에 `useEffect` + `onSnapshot`을 직접 쓰지 말고 전용 훅으로 추출한다.
+
+```tsx
+// BAD - 컴포넌트 내 인라인 구독
+useEffect(() => {
+  const q = query(collection(db, 'polls'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => {
+    setPolls(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Poll)));
+  });
+}, []);
+
+// GOOD - src/hooks/usePolls.ts
+export function usePolls(): Poll[] {
+  const [polls, setPolls] = useState<Poll[]>([]);
+  useEffect(() => {
+    const q = query(collection(db, 'polls'), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snap) => {
+      setPolls(snap.docs.map((d) => mapPoll(d)));
+    });
+  }, []);
+  return polls;
+}
+```
+
+## Firestore 문서 매핑 함수를 공통화
+
+`as Poll` 타입 단언을 컴포넌트마다 반복하지 않는다. `src/lib/mappers.ts`에 mapper 함수를 둔다.
+
+```ts
+// src/lib/mappers.ts
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import type { Poll } from '../types';
+
+export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
+  return { id: doc.id, ...doc.data() } as Poll;
+}
+```
+
+## RTDB Presence 로직은 훅으로 분리
+
+방문자 추적 / presence 등록 로직은 `src/hooks/usePresence.ts`로 분리한다.
+컴포넌트에서는 `usePresence()` 한 줄만 호출한다.
