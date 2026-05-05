@@ -5,6 +5,11 @@ import { rtdb } from '../lib/firebase';
 /** onDisconnect가 실패해도 1분 이상 heartbeat 없는 항목은 오프라인으로 간주 */
 const STALE_THRESHOLD_MS = 1 * 60 * 1000;
 
+/** KST 기준 오늘 날짜를 YYYY-MM-DD 형식으로 반환 */
+function getTodayKST(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 interface PresenceStats {
   /** 현재 실시간 접속 중인 세션 수 */
   presenceCount: number;
@@ -35,7 +40,7 @@ export function usePresenceStats(): PresenceStats {
   }, []);
 
   useEffect(() => {
-    const visitorsRef = ref(rtdb, 'visitors');
+    const visitorsRef = ref(rtdb, `visitors/${getTodayKST()}`);
     const unsub = onValue(visitorsRef, (snap) => {
       setVisitorCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
