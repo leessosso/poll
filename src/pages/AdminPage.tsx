@@ -1,11 +1,14 @@
-import { useState } from 'react';
-import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { usePolls } from '../hooks/usePolls';
 import { usePresenceStats } from '../hooks/usePresenceStats';
 import type { Poll } from '../types';
 import PollAdminCard from '../components/PollAdminCard';
 import CreatePollForm from '../components/CreatePollForm';
+import PollParticipationPanel from '../components/PollParticipationPanel';
+import VoterRosterPanel from '../components/VoterRosterPanel';
+import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? 'admin1234';
 
@@ -73,22 +76,31 @@ function AdminDashboard() {
       alert('먼저 현재 진행 중인 투표를 마감해주세요.');
       return;
     }
-    await updateDoc(doc(db, 'polls', poll.id), { status: 'active' });
+    await startPollWithParticipation(poll);
   };
 
   const closePoll = (poll: Poll) =>
-    updateDoc(doc(db, 'polls', poll.id), { status: 'closed' });
+    finalizePoll(poll);
 
   const deletePoll = async (poll: Poll) => {
     if (!confirm(`"${poll.title}" 투표를 삭제하시겠습니까?`)) return;
     await deleteDoc(doc(db, 'polls', poll.id));
   };
 
-  const toggleResults = (poll: Poll) =>
-    updateDoc(doc(db, 'polls', poll.id), { showResults: !poll.showResults });
+  const toggleResults = (poll: Poll) => togglePollResults(poll);
 
   const toggleExpanded = (id: string) =>
     setExpandedId((prev) => (prev === id ? null : id));
+
+  useEffect(() => {
+    if (!activePoll?.endsAt) return;
+    const id = window.setInterval(() => {
+      if (activePoll.status === 'active' && activePoll.endsAt && Date.now() >= activePoll.endsAt) {
+        void finalizePoll(activePoll);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [activePoll]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -123,8 +135,13 @@ function AdminDashboard() {
               onDelete={deletePoll}
               onToggleResults={toggleResults}
             />
+            <div className="mt-3">
+              <PollParticipationPanel poll={activePoll} />
+            </div>
           </section>
         )}
+
+        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} />
 
         {waitingPolls.length > 0 && (
           <section>

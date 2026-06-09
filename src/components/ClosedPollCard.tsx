@@ -24,7 +24,11 @@ export default function ClosedPollCard({ poll }: ClosedPollCardProps) {
       {open && (
         <div className="px-5 pb-5 border-t border-gray-50">
           <div className="pt-4">
-            <ResultsBar poll={poll} />
+            {poll.showResults ? (
+              <ResultsBar poll={poll} />
+            ) : (
+              <p className="text-center text-sm text-gray-400">결과가 아직 공개되지 않았습니다</p>
+            )}
           </div>
         </div>
       )}

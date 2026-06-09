@@ -15,9 +15,12 @@ export default function ResultsBar({ poll }: ResultsBarProps) {
         const count = poll.results[option] ?? 0;
         const percent = total > 0 ? Math.round((count / total) * 100) : 0;
         const isYes = option === '찬성';
+        const isAbstain = option === '기권';
         const barColor =
           poll.type === 'yesno'
-            ? isYes
+            ? isAbstain
+              ? 'bg-gray-500'
+              : isYes
               ? 'bg-blue-500'
               : 'bg-red-400'
             : 'bg-indigo-500';

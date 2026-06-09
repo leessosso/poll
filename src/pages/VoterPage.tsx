@@ -1,16 +1,24 @@
+import { useParams } from 'react-router-dom';
 import { usePolls } from '../hooks/usePolls';
 import { usePresence } from '../hooks/usePresence';
 import { useVote } from '../hooks/useVote';
+import { useVoterParticipationStatus } from '../hooks/useVoterParticipationStatus';
+import { useVoterSession } from '../hooks/useVoterSession';
 import ActivePollCard from '../components/ActivePollCard';
 import ClosedPollCard from '../components/ClosedPollCard';
+import VoterAuthGate from '../components/VoterAuthGate';
 
 export default function VoterPage() {
+  const { sessionId } = useParams();
   const { polls, loading } = usePolls();
   usePresence();
-  const { votingFor, handleVote } = useVote();
+  const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
+  const { votingFor, error: voteError, handleVote } = useVote();
 
   const activePoll = polls.find((p) => p.status === 'active');
+  const attendanceCompleted = useVoterParticipationStatus(activePoll ?? null, session);
   const closedPolls = polls.filter((p) => p.status === 'closed');
+  const requiresAttendance = activePoll?.eligibilityMode === 'attendance';
 
   if (loading) {
     return (
@@ -24,14 +32,21 @@ export default function VoterPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-indigo-600 text-white px-5 py-4 shadow">
         <h1 className="text-lg font-bold">등촌교회 2층년회 투표 시스템</h1>
+        {session && (
+          <p className="text-indigo-100 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
+        )}
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
-        {activePoll ? (
+        {activePoll && requiresAttendance && !session ? (
+          <VoterAuthGate loading={sessionLoading} error={sessionError} />
+        ) : activePoll ? (
           <ActivePollCard
             poll={activePoll}
-            onVote={handleVote}
+            onVote={(poll, choice) => handleVote(poll, choice, session)}
             voting={votingFor === activePoll.id}
+            voted={requiresAttendance ? attendanceCompleted : undefined}
+            error={voteError}
           />
         ) : (
           <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">

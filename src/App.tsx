@@ -7,6 +7,7 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route path="/" element={<VoterPage />} />
+        <Route path="/v/:sessionId" element={<VoterPage />} />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
     </HashRouter>

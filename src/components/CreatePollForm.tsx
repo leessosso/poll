@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Poll, PollType } from '../types';
+import type { EligibilityMode, Poll, PollType } from '../types';
 
 interface CreatePollFormProps {
   onClose: () => void;
@@ -13,6 +13,14 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
 
   const [title, setTitle] = useState(editPoll?.title ?? '');
   const [type, setType] = useState<PollType>(editPoll?.type ?? 'yesno');
+  const [eligibilityMode, setEligibilityMode] = useState<EligibilityMode>(
+    editPoll?.eligibilityMode ?? 'open',
+  );
+  const [allowAbstain, setAllowAbstain] = useState(editPoll?.allowAbstain ?? false);
+  const [eventId, setEventId] = useState(editPoll?.eventId ?? 'elder-vote');
+  const [durationMinutes, setDurationMinutes] = useState(
+    Math.max(1, Math.round((editPoll?.durationSeconds ?? 180) / 60)),
+  );
   const [options, setOptions] = useState<string[]>(
     editPoll?.type === 'choice' ? editPoll.options : ['', '']
   );
@@ -32,22 +40,36 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
     setLoading(true);
     setError('');
     try {
-      const finalOptions = type === 'yesno' ? ['찬성', '반대'] : options.map((o) => o.trim());
+      const finalOptions =
+        type === 'yesno'
+          ? allowAbstain
+            ? ['찬성', '반대', '기권']
+            : ['찬성', '반대']
+          : options.map((o) => o.trim());
+      const durationSeconds = durationMinutes * 60;
 
       if (isEdit && editPoll) {
         await updateDoc(doc(db, 'polls', editPoll.id), {
           title: title.trim(),
           type,
           options: finalOptions,
+          eligibilityMode,
+          allowAbstain,
+          eventId: eligibilityMode === 'attendance' ? eventId.trim() : '',
+          durationSeconds,
         });
       } else {
         await addDoc(collection(db, 'polls'), {
           title: title.trim(),
           type,
           options: finalOptions,
+          eligibilityMode,
+          allowAbstain,
+          eventId: eligibilityMode === 'attendance' ? eventId.trim() : '',
+          durationSeconds,
           status: 'waiting',
           createdAt: Date.now(),
-          results: {},
+          results: Object.fromEntries(finalOptions.map((option) => [option, 0])),
           showResults: false,
         });
       }
@@ -81,6 +103,34 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">참여 방식</label>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => setEligibilityMode('open')}
+                className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                  eligibilityMode === 'open'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-600 border-gray-300'
+                }`}
+              >
+                누구나 참여 가능 (기존 방식)
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEligibilityMode('attendance'); setAllowAbstain(true); }}
+                className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                  eligibilityMode === 'attendance'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-600 border-gray-300'
+                }`}
+              >
+                QR 출석 인증 필요 (장로 선출)
+              </button>
+            </div>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">투표 유형</label>
             <div className="flex gap-3">
               <button
@@ -107,6 +157,44 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
               </button>
             </div>
           </div>
+
+          {type === 'yesno' && (
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={allowAbstain}
+                onChange={(e) => setAllowAbstain(e.target.checked)}
+                className="w-4 h-4"
+              />
+              기권 선택지를 포함합니다
+            </label>
+          )}
+
+          {eligibilityMode === 'attendance' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">행사 ID</label>
+                <input
+                  type="text"
+                  value={eventId}
+                  onChange={(e) => setEventId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">제한시간(분)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           {type === 'choice' && (
             <div>
