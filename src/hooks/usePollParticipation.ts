@@ -12,19 +12,23 @@ interface UsePollParticipationResult {
 
 export function usePollParticipation(poll: Poll | null): UsePollParticipationResult {
   const [participants, setParticipants] = useState<Participation[]>([]);
-  const enabled = Boolean(poll && poll.eligibilityMode === 'attendance');
+  const [loadedPollId, setLoadedPollId] = useState<string | null>(null);
+  const pollId = poll?.id;
+  const mode = poll?.eligibilityMode;
+  const enabled = mode === 'attendance' || mode === 'roster';
 
   useEffect(() => {
-    if (!poll || poll.eligibilityMode !== 'attendance') return;
+    if (!pollId || (mode !== 'attendance' && mode !== 'roster')) return;
 
-    const q = query(collection(db, 'polls', poll.id, 'participation'), orderBy('voterName', 'asc'));
+    const q = query(collection(db, 'polls', pollId, 'participation'), orderBy('voterName', 'asc'));
     const unsub = onSnapshot(q, (snap) => {
+      setLoadedPollId(pollId);
       setParticipants(
-        snap.docs.map((doc) => {
-          const data = doc.data();
+        snap.docs.map((participantDoc) => {
+          const data = participantDoc.data();
           return {
-            id: doc.id,
-            voterId: data.voterId ?? doc.id,
+            id: participantDoc.id,
+            voterId: data.voterId ?? participantDoc.id,
             voterName: data.voterName ?? '이름 없음',
             status: data.status ?? 'pending',
             completedAt: data.completedAt,
@@ -34,11 +38,16 @@ export function usePollParticipation(poll: Poll | null): UsePollParticipationRes
     });
 
     return unsub;
-  }, [poll]);
+  }, [pollId, mode]);
 
   const visibleParticipants = enabled ? participants : [];
   const pending = visibleParticipants.filter((participant) => participant.status !== 'completed');
   const completed = visibleParticipants.filter((participant) => participant.status === 'completed');
 
-  return { participants: visibleParticipants, pending, completed, loading: false };
+  return {
+    participants: visibleParticipants,
+    pending,
+    completed,
+    loading: enabled && loadedPollId !== pollId,
+  };
 }

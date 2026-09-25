@@ -1,17 +1,21 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   increment,
   query,
   runTransaction,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
-import type { AttendanceSession, Poll, Voter, VoterSession } from '../types';
+import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
+
+const MEETING_DOC = doc(db, 'meeting', 'current');
 
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -97,6 +101,19 @@ export async function startPollWithParticipation(poll: Poll): Promise<void> {
     results: initialResults,
   });
 
+  if (poll.eligibilityMode === 'roster') {
+    const checkinsSnap = await getDocs(collection(db, 'checkins'));
+    checkinsSnap.docs.forEach((checkinDoc) => {
+      const data = checkinDoc.data();
+      batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
+        voterId: data.voterId ?? checkinDoc.id,
+        voterName: data.voterName ?? '이름 없음',
+        status: 'pending',
+        createdAt: now,
+      });
+    });
+  }
+
   if (poll.eligibilityMode === 'attendance') {
     const sessionsSnap = await getDocs(
       query(
@@ -125,39 +142,38 @@ export async function startPollWithParticipation(poll: Poll): Promise<void> {
 
 export async function finalizePoll(poll: Poll): Promise<void> {
   const now = Date.now();
-  const batch = writeBatch(db);
+  const pollRef = doc(db, 'polls', poll.id);
+  const tracksParticipation = poll.eligibilityMode === 'attendance' || poll.eligibilityMode === 'roster';
+  const pendingRefs = tracksParticipation
+    ? (
+        await getDocs(
+          query(collection(db, 'polls', poll.id, 'participation'), where('status', '==', 'pending')),
+        )
+      ).docs.map((participantDoc) => participantDoc.ref)
+    : [];
 
-  if (poll.eligibilityMode === 'attendance') {
-    const pendingSnap = await getDocs(
-      query(collection(db, 'polls', poll.id, 'participation'), where('status', '==', 'pending')),
-    );
+  await runTransaction(db, async (tx) => {
+    const pollSnap = await tx.get(pollRef);
+    if (!pollSnap.exists() || pollSnap.data().status !== 'active') return;
 
-    pendingSnap.docs.forEach((participantDoc) => {
-      const ballotRef = doc(collection(db, 'polls', poll.id, 'ballots'));
-      batch.set(ballotRef, {
-        choice: '기권',
-        createdAt: now,
-        source: 'timeout',
-      });
-      batch.update(participantDoc.ref, {
-        status: 'completed',
-        completedAt: now,
-      });
-    });
-
-    if (pendingSnap.size > 0) {
-      batch.update(doc(db, 'polls', poll.id), {
-        'results.기권': increment(pendingSnap.size),
-      });
+    const stillPending = [];
+    for (const participantRef of pendingRefs) {
+      const participantSnap = await tx.get(participantRef);
+      if (participantSnap.exists() && participantSnap.data().status === 'pending') {
+        stillPending.push(participantSnap.ref);
+      }
     }
-  }
 
-  batch.update(doc(db, 'polls', poll.id), {
-    status: 'closed',
-    closedAt: now,
+    for (const participantRef of stillPending) {
+      tx.update(participantRef, { status: 'completed', completedAt: now });
+    }
+
+    const updates: Record<string, unknown> = { status: 'closed', closedAt: now };
+    if (stillPending.length > 0 && poll.allowAbstain) {
+      updates['results.기권'] = increment(stillPending.length);
+    }
+    tx.update(pollRef, updates);
   });
-
-  await batch.commit();
 }
 
 export async function castAttendanceVote(
@@ -169,7 +185,6 @@ export async function castAttendanceVote(
   const sessionRef = doc(db, 'attendanceSessions', session.sessionId);
   const pollRef = doc(db, 'polls', poll.id);
   const participantRef = doc(db, 'polls', poll.id, 'participation', session.voterId);
-  const ballotRef = doc(collection(db, 'polls', poll.id, 'ballots'));
 
   await runTransaction(db, async (tx) => {
     const [sessionSnap, pollSnap, participantSnap] = await Promise.all([
@@ -191,15 +206,11 @@ export async function castAttendanceVote(
     const currentPoll = { id: pollSnap.id, ...pollSnap.data() } as Poll;
     if (currentPoll.status !== 'active') throw new Error('진행 중인 투표가 아닙니다.');
     if (currentPoll.endsAt && now >= currentPoll.endsAt) throw new Error('투표 시간이 종료되었습니다.');
+    if (!getOptions(currentPoll).includes(choice)) throw new Error('선택할 수 없는 항목입니다.');
     if (participantSnap.exists() && participantSnap.data().status === 'completed') {
       throw new Error('이미 투표를 완료했습니다.');
     }
 
-    tx.set(ballotRef, {
-      choice,
-      createdAt: now,
-      source: 'manual',
-    });
     tx.set(
       participantRef,
       {
@@ -218,4 +229,85 @@ export async function castAttendanceVote(
 
 export async function togglePollResults(poll: Poll): Promise<void> {
   await updateDoc(doc(db, 'polls', poll.id), { showResults: !poll.showResults });
+}
+
+export function generateRoomCode(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+export async function updateRoomCode(roomCode: string): Promise<void> {
+  await setDoc(MEETING_DOC, { roomCode, updatedAt: Date.now() }, { merge: true });
+}
+
+export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<RosterClaim> {
+  const checkinRef = doc(db, 'checkins', voter.id);
+  const claimToken = crypto.randomUUID();
+  const normalizedCode = roomCode.trim();
+
+  await runTransaction(db, async (tx) => {
+    const [meetingSnap, checkinSnap] = await Promise.all([tx.get(MEETING_DOC), tx.get(checkinRef)]);
+    const expected = meetingSnap.exists() ? String(meetingSnap.data().roomCode ?? '') : '';
+    if (!expected || expected !== normalizedCode) throw new Error('입장 코드가 맞지 않습니다.');
+    if (checkinSnap.exists()) throw new Error('이미 다른 분이 선택한 이름입니다.');
+
+    tx.set(checkinRef, {
+      voterId: voter.id,
+      voterName: voter.name,
+      claimedAt: Date.now(),
+      claimToken,
+    });
+  });
+
+  return { voterId: voter.id, voterName: voter.name, claimToken };
+}
+
+export async function releaseRosterClaim(voterId: string, activePoll: Poll | null): Promise<void> {
+  const checkinRef = doc(db, 'checkins', voterId);
+  const tracksParticipation =
+    activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
+
+  if (!tracksParticipation) {
+    await deleteDoc(checkinRef);
+    return;
+  }
+
+  const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
+  await runTransaction(db, async (tx) => {
+    const participantSnap = await tx.get(participantRef);
+    if (participantSnap.exists() && participantSnap.data().status === 'completed') {
+      throw new Error('이미 투표를 완료한 이름은 해제할 수 없습니다.');
+    }
+    if (participantSnap.exists()) tx.delete(participantRef);
+    tx.delete(checkinRef);
+  });
+}
+
+export async function castRosterVote(poll: Poll, choice: string, claim: RosterClaim): Promise<void> {
+  const now = Date.now();
+  const pollRef = doc(db, 'polls', poll.id);
+  const checkinRef = doc(db, 'checkins', claim.voterId);
+  const participantRef = doc(db, 'polls', poll.id, 'participation', claim.voterId);
+
+  await runTransaction(db, async (tx) => {
+    const [checkinSnap, pollSnap, participantSnap] = await Promise.all([
+      tx.get(checkinRef),
+      tx.get(pollRef),
+      tx.get(participantRef),
+    ]);
+
+    if (!checkinSnap.exists() || checkinSnap.data().claimToken !== claim.claimToken) {
+      throw new Error('입장 정보가 없습니다. 다시 이름을 선택해 주세요.');
+    }
+    if (!pollSnap.exists()) throw new Error('투표를 찾을 수 없습니다.');
+
+    const currentPoll = { id: pollSnap.id, ...pollSnap.data() } as Poll;
+    if (currentPoll.status !== 'active') throw new Error('진행 중인 투표가 아닙니다.');
+    if (currentPoll.endsAt && now >= currentPoll.endsAt) throw new Error('투표 시간이 종료되었습니다.');
+    if (!getOptions(currentPoll).includes(choice)) throw new Error('선택할 수 없는 항목입니다.');
+    if (!participantSnap.exists()) throw new Error('이번 투표 명단에 없습니다.');
+    if (participantSnap.data().status === 'completed') throw new Error('이미 투표를 완료했습니다.');
+
+    tx.update(participantRef, { status: 'completed', completedAt: now });
+    tx.update(pollRef, { [`results.${choice}`]: increment(1) });
+  });
 }

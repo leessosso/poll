@@ -1,6 +1,7 @@
 import { getPollTotal } from '../lib/poll-utils';
 import type { Poll } from '../types';
 import PollCountdown from './PollCountdown';
+import PollDecisionBadge, { QuorumProgress } from './PollDecisionBadge';
 import ResultsBar from './ResultsBar';
 
 const STATUS_COLOR: Record<Poll['status'], string> = {
@@ -51,7 +52,12 @@ export default function PollAdminCard({
             <p className="text-gray-800 font-semibold truncate">{poll.title}</p>
             <p className="text-xs text-gray-400 mt-0.5">
               {poll.type === 'yesno' ? '찬반' : `${poll.options.length}개 선택지`} ·{' '}
-              {poll.eligibilityMode === 'attendance' ? 'QR 출석 인증' : '누구나 참여'} · 총 {total}표
+              {poll.eligibilityMode === 'attendance'
+                ? 'QR 출석 인증'
+                : poll.eligibilityMode === 'roster'
+                  ? '현장 명단'
+                  : '누구나 참여'}{' '}
+              · 총 {total}표
             </p>
           </div>
           <span className="text-gray-400 mt-1">{expanded ? '▲' : '▼'}</span>
@@ -60,8 +66,10 @@ export default function PollAdminCard({
 
       {expanded && (
         <div className="px-5 pb-5 border-t border-gray-50 space-y-4">
-          <div className="pt-4">
+          <div className="pt-4 space-y-3">
             <PollCountdown poll={poll} />
+            {poll.status === 'active' && <QuorumProgress poll={poll} />}
+            {poll.status === 'closed' && <PollDecisionBadge poll={poll} />}
           </div>
           <div className="pt-4">
             <ResultsBar poll={poll} />

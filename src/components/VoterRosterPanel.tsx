@@ -1,38 +1,25 @@
 import { useEffect, useState } from 'react';
-import { addDoc, collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { createAttendanceSession } from '../lib/vote-service';
-import type { AttendanceSession, Voter } from '../types';
+import { useMeetingCode } from '../hooks/useMeetingCode';
+import { useRosterDirectory } from '../hooks/useRosterDirectory';
+import { createAttendanceSession, generateRoomCode, releaseRosterClaim, updateRoomCode } from '../lib/vote-service';
+import type { AttendanceSession, Poll, Voter } from '../types';
 
 interface VoterRosterPanelProps {
   eventId: string;
+  activePoll: Poll | null;
 }
 
-export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
-  const [voters, setVoters] = useState<Voter[]>([]);
+export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPanelProps) {
+  const { voters, claimedIds } = useRosterDirectory();
+  const { roomCode, loading: codeLoading } = useMeetingCode();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
-  const [name, setName] = useState('');
-  const [externalQrId, setExternalQrId] = useState('');
+  const [namesText, setNamesText] = useState('');
+  const [adding, setAdding] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'voters'), orderBy('name', 'asc')), (snap) => {
-      setVoters(
-        snap.docs.map((voterDoc) => {
-          const data = voterDoc.data();
-          return {
-            id: voterDoc.id,
-            name: data.name ?? '이름 없음',
-            externalQrId: data.externalQrId,
-            memberNo: data.memberNo,
-            active: data.active ?? true,
-            createdAt: data.createdAt ?? 0,
-          };
-        }),
-      );
-    });
-    return unsub;
-  }, []);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'attendanceSessions'), (snap) => {
@@ -45,17 +32,50 @@ export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
     return unsub;
   }, [eventId]);
 
-  const addVoter = async (e: React.FormEvent) => {
+  const parsedNames = parseRosterNames(namesText);
+
+  const addVoters = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    await addDoc(collection(db, 'voters'), {
-      name: name.trim(),
-      externalQrId: externalQrId.trim(),
-      active: true,
-      createdAt: Date.now(),
-    });
-    setName('');
-    setExternalQrId('');
+    const existing = new Set(voters.map((voter) => voter.name.trim()));
+    const fresh = parsedNames.filter((voterName) => !existing.has(voterName));
+    const skipped = parsedNames.length - fresh.length;
+    if (fresh.length === 0) {
+      setNotice({
+        text: parsedNames.length === 0 ? '이름을 입력해 주세요.' : '입력한 이름은 이미 명단에 있습니다.',
+        tone: 'error',
+      });
+      return;
+    }
+
+    setAdding(true);
+    setNotice(null);
+    try {
+      const now = Date.now();
+      for (let offset = 0; offset < fresh.length; offset += 400) {
+        const batch = writeBatch(db);
+        fresh.slice(offset, offset + 400).forEach((voterName) => {
+          batch.set(doc(collection(db, 'voters')), {
+            name: voterName,
+            externalQrId: '',
+            active: true,
+            createdAt: now,
+          });
+        });
+        await batch.commit();
+      }
+      setNamesText('');
+      setNotice({
+        text:
+          skipped > 0
+            ? `${fresh.length}명을 추가했습니다. 이미 있는 이름 ${skipped}명은 건너뛰었습니다.`
+            : `${fresh.length}명을 추가했습니다.`,
+        tone: 'ok',
+      });
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '명단을 추가하지 못했습니다.', tone: 'error' });
+    } finally {
+      setAdding(false);
+    }
   };
 
   const createSession = async (voter: Voter) => {
@@ -69,31 +89,77 @@ export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
 
   const hasActiveSession = (voterId: string) => sessions.some((session) => session.voterId === voterId);
 
+  const changeRoomCode = async () => {
+    setNotice(null);
+    try {
+      await updateRoomCode(generateRoomCode());
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '입장 코드를 바꾸지 못했습니다.', tone: 'error' });
+    }
+  };
+
+  const releaseClaim = async (voter: Voter) => {
+    setReleasingId(voter.id);
+    setNotice(null);
+    try {
+      await releaseRosterClaim(voter.id, activePoll);
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '입장을 해제하지 못했습니다.', tone: 'error' });
+    } finally {
+      setReleasingId(null);
+    }
+  };
+
   return (
     <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-bold text-gray-800">현장 입장</h2>
+          <p className="text-sm text-gray-400 mt-1">
+            이 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다.
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-3xl font-bold tracking-widest text-indigo-700">
+            {codeLoading ? '----' : roomCode || '없음'}
+          </p>
+          <button type="button" onClick={changeRoomCode} className="text-xs text-indigo-600 mt-1">
+            {roomCode ? '코드 바꾸기' : '코드 만들기'}
+          </button>
+        </div>
+      </div>
+      {notice && (
+        <p className={`text-sm ${notice.tone === 'ok' ? 'text-green-600' : 'text-red-500'}`}>{notice.text}</p>
+      )}
       <div>
-        <h2 className="font-bold text-gray-800">출석 인증 테스트/관리</h2>
+        <h2 className="font-bold text-gray-800">명단</h2>
         <p className="text-sm text-gray-400 mt-1">
-          실제 QR 스캐너 연동 전까지 성도와 출석 세션을 수동으로 만들 수 있습니다.
+          한 줄에 한 명씩 붙여 넣으면 함께 등록됩니다. 이미 있는 이름은 다시 넣지 않습니다.
         </p>
       </div>
 
-      <form onSubmit={addVoter} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="성도 이름"
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+      <form onSubmit={addVoters} className="space-y-2">
+        <label htmlFor="roster-names" className="block text-sm font-medium text-gray-700">
+          이름
+        </label>
+        <textarea
+          id="roster-names"
+          value={namesText}
+          onChange={(e) => setNamesText(e.target.value)}
+          placeholder={'김철수\n이영희\n박민수'}
+          rows={5}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
         />
-        <input
-          value={externalQrId}
-          onChange={(e) => setExternalQrId(e.target.value)}
-          placeholder="QR/회원 식별값 (선택)"
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-        />
-        <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
-          추가
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-400">{parsedNames.length}명</p>
+          <button
+            type="submit"
+            disabled={adding || parsedNames.length === 0}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+          >
+            {adding ? '추가 중...' : '명단 추가'}
+          </button>
+        </div>
       </form>
 
       <div className="space-y-2 max-h-72 overflow-y-auto">
@@ -111,6 +177,19 @@ export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <span className={`text-xs ${claimedIds.has(voter.id) ? 'text-green-600' : 'text-gray-400'}`}>
+                  {claimedIds.has(voter.id) ? '입장함' : '미입장'}
+                </span>
+                {claimedIds.has(voter.id) && (
+                  <button
+                    type="button"
+                    onClick={() => releaseClaim(voter)}
+                    disabled={releasingId === voter.id}
+                    className="text-xs text-red-500 disabled:opacity-40"
+                  >
+                    {releasingId === voter.id ? '해제 중' : '입장 해제'}
+                  </button>
+                )}
                 <span className={`text-xs ${active ? 'text-green-600' : 'text-gray-400'}`}>
                   {active ? '출석 세션 있음' : '미출석'}
                 </span>
@@ -136,7 +215,7 @@ export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
             {sessions.slice(0, 5).map((session) => (
               <p key={session.id} className="text-xs text-gray-500 break-all">
                 {session.voterName}: {window.location.origin}
-                {window.location.pathname}#/v/{session.id}
+                {import.meta.env.BASE_URL}v/{session.id}
               </p>
             ))}
           </div>
@@ -144,4 +223,16 @@ export default function VoterRosterPanel({ eventId }: VoterRosterPanelProps) {
       )}
     </section>
   );
+}
+
+function parseRosterNames(text: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const part of text.split(/[\n,，]+/)) {
+    const name = part.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
 }

@@ -44,8 +44,8 @@ React + Firebase + GitHub Pages 기반 실시간 투표 시스템입니다.
 | URL | 설명 |
 |-----|------|
 | `https://leessosso.github.io/poll/` | 투표자 화면 |
-| `https://leessosso.github.io/poll/#/admin` | 관리자 화면 |
-| `https://leessosso.github.io/poll/#/v/{sessionId}` | QR 출석 세션 기반 투표자 화면 |
+| `https://leessosso.github.io/poll/admin` | 관리자 화면 |
+| `https://leessosso.github.io/poll/v/{sessionId}` | QR 출석 세션 기반 투표자 화면 |
 
 ## 장로 선출 투표 흐름
 

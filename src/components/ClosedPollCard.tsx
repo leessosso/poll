@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Poll } from '../types';
+import PollDecisionBadge from './PollDecisionBadge';
 import ResultsBar from './ResultsBar';
 
 interface ClosedPollCardProps {
@@ -23,9 +24,12 @@ export default function ClosedPollCard({ poll }: ClosedPollCardProps) {
       </button>
       {open && (
         <div className="px-5 pb-5 border-t border-gray-50">
-          <div className="pt-4">
+          <div className="pt-4 space-y-3">
             {poll.showResults ? (
-              <ResultsBar poll={poll} />
+              <>
+                <PollDecisionBadge poll={poll} />
+                <ResultsBar poll={poll} />
+              </>
             ) : (
               <p className="text-center text-sm text-gray-400">결과가 아직 공개되지 않았습니다</p>
             )}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { getOptions, hasVoted } from '../lib/poll-utils';
 import type { Poll } from '../types';
 import PollCountdown from './PollCountdown';
+import { QuorumProgress } from './PollDecisionBadge';
 import ResultsBar from './ResultsBar';
 import VoteConfirmModal from './VoteConfirmModal';
 
@@ -21,7 +22,7 @@ export default function ActivePollCard({
   error,
 }: ActivePollCardProps) {
   const [pendingChoice, setPendingChoice] = useState<string | null>(null);
-  const voted = votedOverride ?? hasVoted(poll.id);
+  const voted = votedOverride !== undefined ? votedOverride : hasVoted(poll.id);
   const options = getOptions(poll);
 
   const handleConfirm = async () => {
@@ -38,8 +39,9 @@ export default function ActivePollCard({
       </div>
       <div className="p-5">
         <h2 className="text-xl font-bold text-gray-800 mb-4">{poll.title}</h2>
-        <div className="mb-4">
+        <div className="mb-4 space-y-3">
           <PollCountdown poll={poll} />
+          <QuorumProgress poll={poll} />
         </div>
 
         {voted ? (

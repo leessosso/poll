@@ -13,7 +13,7 @@ export default function PollParticipationPanel({ poll }: PollParticipationPanelP
   const completedCount = completed.length;
   const percent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
 
-  if (poll.eligibilityMode !== 'attendance') return null;
+  if (poll.eligibilityMode !== 'attendance' && poll.eligibilityMode !== 'roster') return null;
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4">
@@ -32,10 +32,11 @@ export default function PollParticipationPanel({ poll }: PollParticipationPanelP
         </div>
       </div>
 
-      {total === 0 ? (
+      {loading ? null : total === 0 ? (
         <p className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
-          아직 이 투표에 연결된 출석 세션이 없습니다. 출석 세션을 만든 뒤 투표를 시작하면
-          미참여 목록이 표시됩니다.
+          {poll.eligibilityMode === 'roster'
+            ? '투표 시작 전에 입장한 사람이 없습니다. 입장 코드와 이름을 선택한 뒤 투표를 시작하면 명단이 고정됩니다.'
+            : '아직 이 투표에 연결된 출석 세션이 없습니다. 출석 세션을 만든 뒤 투표를 시작하면 미참여 목록이 표시됩니다.'}
         </p>
       ) : pending.length === 0 ? (
         <div className="bg-green-50 text-green-700 rounded-lg p-3 font-medium text-center">

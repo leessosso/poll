@@ -141,7 +141,7 @@ function AdminDashboard() {
           </section>
         )}
 
-        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} />
+        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} />
 
         {waitingPolls.length > 0 && (
           <section>

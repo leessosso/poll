@@ -1,24 +1,34 @@
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Poll, VoterSession } from '../types';
+import type { Poll } from '../types';
 
-export function useVoterParticipationStatus(
-  poll: Poll | null,
-  session: VoterSession | null,
-): boolean {
-  const [completed, setCompleted] = useState(false);
-  const enabled = Boolean(poll && poll.eligibilityMode === 'attendance' && session);
+export type ParticipationView = 'hidden' | 'loading' | 'pending' | 'completed' | 'absent';
+
+export function useVoterParticipationStatus(poll: Poll | null, voterId: string | null): ParticipationView {
+  const [view, setView] = useState<ParticipationView>('loading');
+  const [snapshotKey, setSnapshotKey] = useState('');
+  const pollId = poll?.id;
+  const mode = poll?.eligibilityMode;
+  const currentKey = `${pollId ?? ''}:${voterId ?? ''}`;
+  const tracked = Boolean(pollId && voterId && (mode === 'attendance' || mode === 'roster'));
 
   useEffect(() => {
-    if (!poll || poll.eligibilityMode !== 'attendance' || !session) return;
+    if (!pollId || !voterId || (mode !== 'attendance' && mode !== 'roster')) return;
 
-    const unsub = onSnapshot(doc(db, 'polls', poll.id, 'participation', session.voterId), (snap) => {
-      setCompleted(snap.exists() && snap.data().status === 'completed');
+    const unsub = onSnapshot(doc(db, 'polls', pollId, 'participation', voterId), (snap) => {
+      setSnapshotKey(`${pollId}:${voterId}`);
+      if (!snap.exists()) {
+        setView('absent');
+        return;
+      }
+      setView(snap.data().status === 'completed' ? 'completed' : 'pending');
     });
 
     return unsub;
-  }, [poll, session]);
+  }, [pollId, voterId, mode]);
 
-  return enabled && completed;
+  if (!tracked) return 'hidden';
+  if (snapshotKey !== currentKey) return 'loading';
+  return view;
 }

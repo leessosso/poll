@@ -38,7 +38,7 @@
 출석 세션이 생성되면 아래 형태의 투표 접속 URL이 발급됩니다.
 
 ```text
-https://leessosso.github.io/poll/#/v/{sessionId}
+https://leessosso.github.io/poll/v/{sessionId}
 ```
 
 같은 성도가 브라우저를 닫거나 기기를 바꿔 다시 스캔해도 같은 `voterId`로 판단합니다. 새로 발급되는 것은 `sessionId`뿐이며, 이미 완료한 투표는 다시 할 수 없습니다.
@@ -164,7 +164,7 @@ QR 출석 스캐너
 1. 관리자 화면 접속
 2. `출석 인증 테스트/관리`에서 성도 추가
 3. `출석 세션 생성` 클릭
-4. 표시된 `/#/v/{sessionId}` URL로 투표자 화면 접속
+4. 표시된 `/v/{sessionId}` URL로 투표자 화면 접속
 5. 관리자 화면에서 `QR 출석 인증 필요` 투표 생성
 6. 투표 시작
 7. 투표자 화면에서 찬성/반대/기권 선택

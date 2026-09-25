@@ -1,6 +1,6 @@
 export type PollType = 'yesno' | 'choice';
 export type PollStatus = 'waiting' | 'active' | 'closed';
-export type EligibilityMode = 'open' | 'attendance';
+export type EligibilityMode = 'open' | 'roster' | 'attendance';
 export type VoteChoice = '찬성' | '반대' | '기권' | string;
 export type ParticipationStatus = 'pending' | 'completed';
 export type AttendanceSessionStatus = 'active' | 'revoked';
@@ -21,6 +21,10 @@ export interface Poll {
   startedAt?: number;
   endsAt?: number;
   closedAt?: number;
+  /** 정족수: 유효 투표로 인정하기 위한 최소 참여 인원 (미설정 시 정족수 검사 안 함) */
+  quorumTarget?: number;
+  /** 가결 기준: 찬성 / (찬성 + 반대) 비율. 0~1. 미설정 시 과반(0.5) 기준 */
+  passRatio?: number;
 }
 
 export interface Voter {
@@ -49,6 +53,13 @@ export interface VoterSession {
   voterName: string;
   eventId: string;
   expiresAt: number;
+}
+
+/** 현장 명단에서 이름을 잡은 브라우저. 선택값은 포함하지 않는다. */
+export interface RosterClaim {
+  voterId: string;
+  voterName: string;
+  claimToken: string;
 }
 
 export interface Participation {
