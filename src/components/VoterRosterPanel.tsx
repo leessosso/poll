@@ -3,7 +3,14 @@ import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useMeetingCode } from '../hooks/useMeetingCode';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
-import { createAttendanceSession, generateRoomCode, releaseRosterClaim, updateRoomCode } from '../lib/vote-service';
+import {
+  createAttendanceSession,
+  generateRoomCode,
+  releaseRosterClaim,
+  removeVoterFromRoster,
+  revokeAttendanceSession,
+  updateRoomCode,
+} from '../lib/vote-service';
 import type { AttendanceSession, Poll, Voter } from '../types';
 
 interface VoterRosterPanelProps {
@@ -19,6 +26,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
   const [adding, setAdding] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [releasingId, setReleasingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
 
   useEffect(() => {
@@ -26,7 +34,10 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
       setSessions(
         snap.docs
           .map((sessionDoc) => ({ id: sessionDoc.id, ...sessionDoc.data() }) as AttendanceSession)
-          .filter((session) => session.eventId === eventId && session.status === 'active'),
+          .filter(
+            (session) =>
+              session.eventId === eventId && session.status === 'active' && session.expiresAt > Date.now(),
+          ),
       );
     });
     return unsub;
@@ -98,6 +109,19 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
     }
   };
 
+  const removeVoter = async (voter: Voter) => {
+    if (!confirm(`"${voter.name}" 님을 명단에서 제거할까요?`)) return;
+    setRemovingId(voter.id);
+    setNotice(null);
+    try {
+      await removeVoterFromRoster(voter.id, activePoll);
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '명단에서 제거하지 못했습니다.', tone: 'error' });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
   const releaseClaim = async (voter: Voter) => {
     setReleasingId(voter.id);
     setNotice(null);
@@ -134,7 +158,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
       <div>
         <h2 className="font-bold text-gray-800">명단</h2>
         <p className="text-sm text-gray-400 mt-1">
-          한 줄에 한 명씩 붙여 넣으면 함께 등록됩니다. 이미 있는 이름은 다시 넣지 않습니다.
+          한 줄에 한 명씩 붙여 넣으면 함께 등록됩니다. 잘못 넣은 이름은 명단에서 제거할 수 있습니다.
         </p>
       </div>
 
@@ -195,6 +219,14 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
                 </span>
                 <button
                   type="button"
+                  onClick={() => removeVoter(voter)}
+                  disabled={removingId === voter.id}
+                  className="text-xs text-red-500 disabled:opacity-40"
+                >
+                  {removingId === voter.id ? '제거 중' : '명단 제거'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => createSession(voter)}
                   disabled={loadingId === voter.id || active}
                   className="bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
@@ -213,10 +245,19 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
           <p className="text-sm font-semibold text-gray-700 mb-2">투표 접속 URL</p>
           <div className="space-y-1">
             {sessions.slice(0, 5).map((session) => (
-              <p key={session.id} className="text-xs text-gray-500 break-all">
-                {session.voterName}: {window.location.origin}
-                {import.meta.env.BASE_URL}v/{session.id}
-              </p>
+              <div key={session.id} className="flex items-start justify-between gap-3">
+                <p className="text-xs text-gray-500 break-all">
+                  {session.voterName}: {window.location.origin}
+                  {import.meta.env.BASE_URL}v/{session.id}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => revokeAttendanceSession(session.id)}
+                  className="shrink-0 text-xs text-red-500"
+                >
+                  지우기
+                </button>
+              </div>
             ))}
           </div>
         </div>

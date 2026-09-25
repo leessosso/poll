@@ -261,6 +261,48 @@ export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<R
   return { voterId: voter.id, voterName: voter.name, claimToken };
 }
 
+export async function revokeAttendanceSession(sessionId: string): Promise<void> {
+  await deleteDoc(doc(db, 'attendanceSessions', sessionId));
+}
+
+async function deleteAttendanceSessions(voterId: string): Promise<void> {
+  const snap = await getDocs(
+    query(collection(db, 'attendanceSessions'), where('voterId', '==', voterId)),
+  );
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.docs.forEach((sessionDoc) => batch.delete(sessionDoc.ref));
+  await batch.commit();
+}
+
+export async function removeVoterFromRoster(voterId: string, activePoll: Poll | null): Promise<void> {
+  const voterRef = doc(db, 'voters', voterId);
+  const checkinRef = doc(db, 'checkins', voterId);
+  const tracksParticipation =
+    activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
+
+  if (!tracksParticipation) {
+    const batch = writeBatch(db);
+    batch.delete(voterRef);
+    batch.delete(checkinRef);
+    await batch.commit();
+    await deleteAttendanceSessions(voterId);
+    return;
+  }
+
+  const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
+  await runTransaction(db, async (tx) => {
+    const participantSnap = await tx.get(participantRef);
+    const completed = participantSnap.exists() && participantSnap.data().status === 'completed';
+    tx.delete(voterRef);
+    if (!completed) {
+      if (participantSnap.exists()) tx.delete(participantRef);
+      tx.delete(checkinRef);
+    }
+  });
+  await deleteAttendanceSessions(voterId);
+}
+
 export async function releaseRosterClaim(voterId: string, activePoll: Poll | null): Promise<void> {
   const checkinRef = doc(db, 'checkins', voterId);
   const tracksParticipation =
