@@ -31,7 +31,7 @@ export default function AdminPage() {
 
   if (!authed) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="bg-white rounded-2xl shadow-sm p-8 w-full max-w-sm">
           <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">관리자 로그인</h1>
           <p className="text-gray-400 text-sm text-center mb-6">등촌교회 2층년회 투표 관리</p>
@@ -41,13 +41,13 @@ export default function AdminPage() {
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
               placeholder="비밀번호 입력"
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
               autoFocus
             />
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button
               type="submit"
-              className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700"
+              className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark"
             >
               입장
             </button>
@@ -103,10 +103,10 @@ function AdminDashboard() {
   }, [activePoll]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-indigo-600 text-white px-5 py-4 shadow flex items-center justify-between">
+    <div className="min-h-screen bg-background">
+      <header className="bg-primary text-white px-5 py-4 shadow flex items-center justify-between">
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
-        <div className="flex items-center gap-2 bg-indigo-700 rounded-full px-3 py-1">
+        <div className="flex items-center gap-2 bg-primary-dark rounded-full px-3 py-1">
           <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
           <span className="text-sm font-medium">
             진입 {visitorCount}명 · 현재 {presenceCount}명
@@ -117,7 +117,7 @@ function AdminDashboard() {
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         <button
           onClick={() => setShowCreate(true)}
-          className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-semibold text-lg hover:bg-indigo-700 shadow-sm"
+          className="w-full bg-primary text-white py-4 rounded-2xl font-semibold text-lg hover:bg-primary-dark shadow-sm"
         >
           + 새 투표 만들기
         </button>

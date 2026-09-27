@@ -30,7 +30,7 @@ export default function VoteConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="py-4 rounded-2xl bg-indigo-600 text-white text-lg font-semibold disabled:opacity-50"
+            className="py-4 rounded-2xl bg-primary text-white text-lg font-semibold disabled:opacity-50"
           >
             {loading ? '처리 중...' : '확인'}
           </button>

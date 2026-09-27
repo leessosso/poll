@@ -28,13 +28,13 @@ export default function PollDecisionBadge({ poll }: PollDecisionBadgeProps) {
     return (
       <div
         className={`rounded-xl px-4 py-3 text-center border ${
-          passed ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'
+          passed ? 'bg-primary-light border-primary/20' : 'bg-red-50 border-red-200'
         }`}
       >
-        <p className={`font-bold ${passed ? 'text-blue-700' : 'text-red-600'}`}>
+        <p className={`font-bold ${passed ? 'text-primary' : 'text-red-600'}`}>
           {passed ? '가결' : '부결'}
         </p>
-        <p className={`text-xs mt-1 ${passed ? 'text-blue-500' : 'text-red-400'}`}>
+        <p className={`text-xs mt-1 ${passed ? 'text-primary/80' : 'text-red-400'}`}>
           찬성 {result.approveCount} · 반대 {result.rejectCount} · 기준 {Math.round(result.passRatio * 100)}%
         </p>
       </div>
@@ -62,7 +62,7 @@ export function QuorumProgress({ poll }: PollDecisionBadgeProps) {
       <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
         <div
           className={`h-2 rounded-full transition-all duration-500 ${
-            status === 'met' ? 'bg-green-500' : 'bg-indigo-400'
+            status === 'met' ? 'bg-green-500' : 'bg-primary/60'
           }`}
           style={{ width: `${percent}%` }}
         />

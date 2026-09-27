@@ -32,21 +32,21 @@ export default function VoterPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-gray-400 text-lg">불러오는 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-indigo-600 text-white px-5 py-4 shadow">
+    <div className="min-h-screen bg-background">
+      <header className="bg-primary text-white px-5 py-4 shadow">
         <h1 className="text-lg font-bold">등촌교회 2층년회 투표 시스템</h1>
         {session && (
-          <p className="text-indigo-100 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
+          <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
         )}
         {claim && (
-          <p className="text-indigo-100 text-sm mt-1">{claim.voterName}님 입장 완료</p>
+          <p className="text-white/80 text-sm mt-1">{claim.voterName}님 입장 완료</p>
         )}
       </header>
 

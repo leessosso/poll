@@ -32,8 +32,8 @@ export default function ActivePollCard({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-indigo-100 overflow-hidden">
-      <div className="bg-indigo-600 px-5 py-3 flex items-center gap-2">
+    <div className="bg-white rounded-2xl shadow-sm border border-primary-light overflow-hidden">
+      <div className="bg-primary px-5 py-3 flex items-center gap-2">
         <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
         <span className="text-white text-sm font-medium">진행 중</span>
       </div>
@@ -65,9 +65,9 @@ export default function ActivePollCard({
                   ? isAbstain
                     ? 'bg-gray-500 hover:bg-gray-600 active:bg-gray-700'
                     : isYes
-                    ? 'bg-blue-500 hover:bg-blue-600 active:bg-blue-700'
+                    ? 'bg-primary hover:bg-primary-dark active:bg-primary-dark'
                     : 'bg-red-400 hover:bg-red-500 active:bg-red-600'
-                  : 'bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700';
+                  : 'bg-primary hover:bg-primary-dark active:bg-primary-dark';
 
               return (
                 <button

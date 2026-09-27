@@ -26,7 +26,7 @@ export default function PollParticipationPanel({ poll }: PollParticipationPanelP
         </div>
         <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
           <div
-            className="bg-indigo-600 h-4 rounded-full transition-all duration-500"
+            className="bg-primary h-4 rounded-full transition-all duration-500"
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -60,7 +60,7 @@ export default function PollParticipationPanel({ poll }: PollParticipationPanelP
           <button
             type="button"
             onClick={() => setShowCompleted((prev) => !prev)}
-            className="text-sm font-medium text-indigo-600"
+            className="text-sm font-medium text-primary"
           >
             {showCompleted ? '참여 완료 명단 숨기기' : `참여 완료 명단 보기 (${completed.length}명)`}
           </button>

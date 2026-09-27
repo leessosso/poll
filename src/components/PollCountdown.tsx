@@ -29,7 +29,7 @@ export default function PollCountdown({ poll }: PollCountdownProps) {
   return (
     <div
       className={`rounded-xl px-4 py-3 text-center font-bold ${
-        expired ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-700'
+        expired ? 'bg-red-50 text-red-600' : 'bg-primary-light text-primary'
       }`}
     >
       {expired ? '투표 시간이 종료되었습니다' : `남은 시간 ${formatTime(remainingMs)}`}
