@@ -5,7 +5,7 @@ interface VoterAuthGateProps {
 
 export default function VoterAuthGate({ loading, error }: VoterAuthGateProps) {
   return (
-    <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+    <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
       <div className="text-5xl mb-4">{loading ? '⏳' : '📱'}</div>
       <h2 className="text-2xl font-bold text-gray-800 mb-3">
         {loading ? '출석 정보를 확인 중입니다' : 'QR 출석 확인이 필요합니다'}

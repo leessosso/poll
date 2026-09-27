@@ -5,8 +5,8 @@ import PollDecisionBadge, { QuorumProgress } from './PollDecisionBadge';
 import ResultsBar from './ResultsBar';
 
 const STATUS_COLOR: Record<Poll['status'], string> = {
-  waiting: 'bg-yellow-100 text-yellow-700',
-  active: 'bg-green-100 text-green-700',
+  waiting: 'bg-primary-soft text-primary',
+  active: 'bg-primary-soft text-primary ring-1 ring-accent/40',
   closed: 'bg-gray-100 text-gray-500',
 };
 
@@ -40,7 +40,7 @@ export default function PollAdminCard({
   const total = getPollTotal(poll);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-surface rounded-2xl shadow-sm border border-border overflow-hidden">
       <button onClick={onToggle} className="w-full text-left px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
@@ -79,7 +79,7 @@ export default function PollAdminCard({
             {poll.status === 'waiting' && onActivate && (
               <button
                 onClick={onActivate}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600"
+                className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover shadow-sm"
               >
                 투표 시작
               </button>
@@ -87,7 +87,7 @@ export default function PollAdminCard({
             {poll.status === 'waiting' && onEdit && (
               <button
                 onClick={onEdit}
-                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-300 rounded-lg text-sm font-medium hover:bg-indigo-50"
+                className="px-4 py-2 bg-surface text-primary border border-primary/30 rounded-xl text-sm font-medium hover:bg-primary-soft"
               >
                 수정
               </button>
@@ -95,7 +95,7 @@ export default function PollAdminCard({
             {poll.status === 'active' && onClose && (
               <button
                 onClick={() => onClose(poll)}
-                className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600"
+                className="px-4 py-2 bg-surface text-gray-700 border border-border rounded-xl text-sm font-medium hover:bg-background"
               >
                 투표 마감
               </button>
@@ -103,10 +103,10 @@ export default function PollAdminCard({
             {(poll.status === 'active' || poll.status === 'closed') && (
               <button
                 onClick={() => onToggleResults(poll)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${
                   poll.showResults
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-indigo-600 border-indigo-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-primary border-primary/30'
                 }`}
               >
                 {poll.showResults ? '결과 공개 중' : '결과 공개'}
@@ -114,7 +114,7 @@ export default function PollAdminCard({
             )}
             <button
               onClick={() => onDelete(poll)}
-              className="px-4 py-2 bg-white text-red-400 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50"
+              className="px-4 py-2 bg-surface text-red-500 border border-red-200 rounded-xl text-sm font-medium hover:bg-red-50"
             >
               삭제
             </button>

@@ -11,7 +11,7 @@ export default function ClosedPollCard({ poll }: ClosedPollCardProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-surface rounded-2xl shadow-sm border border-border overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between px-5 py-4 text-left"

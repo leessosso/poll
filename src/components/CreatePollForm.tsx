@@ -106,7 +106,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
-      <div className="flex min-h-0 max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div className="flex min-h-0 max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface shadow-xl border border-border">
         <h2 className="px-6 pt-6 pb-4 text-xl font-bold text-gray-800">
           {isEdit ? '투표 수정' : '새 투표 만들기'}
         </h2>
@@ -119,7 +119,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="예) 2025년 수련회 장소 결정"
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
               required
             />
           </div>
@@ -135,8 +135,8 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 }}
                 className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
                   eligibilityMode === 'roster'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-muted border-border'
                 }`}
               >
                 현장 명단 (이름 선택)
@@ -146,8 +146,8 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 onClick={() => setEligibilityMode('open')}
                 className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
                   eligibilityMode === 'open'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-muted border-border'
                 }`}
               >
                 누구나 참여 가능 (기존 방식)
@@ -157,8 +157,8 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 onClick={() => { setEligibilityMode('attendance'); setAllowAbstain(true); }}
                 className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
                   eligibilityMode === 'attendance'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-muted border-border'
                 }`}
               >
                 QR 출석 인증 필요 (장로 선출)
@@ -174,8 +174,8 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 onClick={() => setType('yesno')}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
                   type === 'yesno'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-muted border-border'
                 }`}
               >
                 찬반 투표
@@ -185,8 +185,8 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 onClick={() => setType('choice')}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
                   type === 'choice'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-300'
+                    ? 'bg-primary-soft text-primary border-primary/25'
+                    : 'bg-surface text-muted border-border'
                 }`}
               >
                 다중 선택
@@ -233,7 +233,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                     value={quorumTarget}
                     onChange={(e) => setQuorumTarget(e.target.value)}
                     placeholder="예) 30 (명)"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                   />
                 )}
                 <div>
@@ -246,7 +246,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                     max={100}
                     value={passPercent}
                     onChange={(e) => setPassPercent(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                   />
                   <p className="text-xs text-gray-400 mt-1">
                     기권을 제외한 찬성/반대 중 찬성 비율이 이 값 이상이면 가결로 표시됩니다. 기본 50%(과반).
@@ -264,7 +264,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                 min={1}
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                 required
               />
             </div>
@@ -278,7 +278,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                   type="text"
                   value={eventId}
                   onChange={(e) => setEventId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                   required
                 />
               </div>
@@ -289,7 +289,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                   min={1}
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                   required
                 />
               </div>
@@ -307,7 +307,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                       value={opt}
                       onChange={(e) => updateOption(i, e.target.value)}
                       placeholder={`선택지 ${i + 1}`}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
                       required
                     />
                     {options.length > 2 && (
@@ -325,7 +325,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
               <button
                 type="button"
                 onClick={addOption}
-                className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                className="mt-2 text-sm text-primary hover:text-primary-hover font-medium"
               >
                 + 선택지 추가
               </button>
@@ -350,7 +350,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50"
+              className="flex-1 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover disabled:opacity-50 shadow-sm"
             >
               {loading ? (isEdit ? '저장 중...' : '생성 중...') : isEdit ? '저장' : '만들기'}
             </button>

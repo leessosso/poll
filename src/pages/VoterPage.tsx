@@ -32,21 +32,21 @@ export default function VoterPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-gray-400 text-lg">불러오는 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-indigo-600 text-white px-5 py-4 shadow">
+    <div className="min-h-screen bg-background">
+      <header className="bg-primary text-white px-5 py-4 shadow">
         <h1 className="text-lg font-bold">등촌교회 2층년회 투표 시스템</h1>
         {session && (
-          <p className="text-indigo-100 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
+          <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
         )}
         {claim && (
-          <p className="text-indigo-100 text-sm mt-1">{claim.voterName}님 입장 완료</p>
+          <p className="text-white/80 text-sm mt-1">{claim.voterName}님 입장 완료</p>
         )}
       </header>
 
@@ -54,7 +54,7 @@ export default function VoterPage() {
         {activePoll && requiresAttendance && !session ? (
           <VoterAuthGate loading={sessionLoading} error={sessionError} />
         ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claimReady ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+          <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <p className="text-gray-500 font-medium">입장 정보를 확인 중입니다</p>
           </div>
         ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claim ? (
@@ -65,11 +65,11 @@ export default function VoterPage() {
             onClaimed={saveClaim}
           />
         ) : activePoll && requiresRoster && participation === 'loading' ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+          <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <p className="text-gray-500 font-medium">투표 명단을 확인 중입니다</p>
           </div>
         ) : activePoll && requiresRoster && participation === 'absent' ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+          <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <p className="text-gray-800 font-semibold mb-2">이번 투표 명단에 없습니다</p>
             <p className="text-gray-500 text-sm">투표가 시작된 뒤에 입장한 이름은 이번 투표에 포함되지 않습니다.</p>
           </div>
@@ -86,7 +86,7 @@ export default function VoterPage() {
             error={voteError}
           />
         ) : (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+          <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <div className="text-4xl mb-3">⏳</div>
             <p className="text-gray-500 font-medium">다음 투표를 기다려주세요</p>
             <p className="text-gray-400 text-sm mt-1">관리자가 투표를 열면 바로 나타납니다</p>

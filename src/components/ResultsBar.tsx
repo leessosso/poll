@@ -21,9 +21,9 @@ export default function ResultsBar({ poll }: ResultsBarProps) {
             ? isAbstain
               ? 'bg-gray-500'
               : isYes
-              ? 'bg-blue-500'
+              ? 'bg-primary'
               : 'bg-red-400'
-            : 'bg-indigo-500';
+            : 'bg-primary';
 
         return (
           <div key={option}>

@@ -135,7 +135,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
   };
 
   return (
-    <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4">
+    <section className="bg-surface rounded-2xl shadow-sm border border-border p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-bold text-gray-800">현장 입장</h2>
@@ -144,10 +144,10 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
           </p>
         </div>
         <div className="text-right">
-          <p className="text-3xl font-bold tracking-widest text-indigo-700">
+          <p className="text-3xl font-bold tracking-widest text-primary">
             {codeLoading ? '----' : roomCode || '없음'}
           </p>
-          <button type="button" onClick={changeRoomCode} className="text-xs text-indigo-600 mt-1">
+          <button type="button" onClick={changeRoomCode} className="text-xs text-primary mt-1">
             {roomCode ? '코드 바꾸기' : '코드 만들기'}
           </button>
         </div>
@@ -179,7 +179,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
           <button
             type="submit"
             disabled={adding || parsedNames.length === 0}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+            className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
           >
             {adding ? '추가 중...' : '명단 추가'}
           </button>
