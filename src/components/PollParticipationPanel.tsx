@@ -16,7 +16,7 @@ export default function PollParticipationPanel({ poll }: PollParticipationPanelP
   if (poll.eligibilityMode !== 'attendance' && poll.eligibilityMode !== 'roster') return null;
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4">
+    <div className="bg-surface rounded-2xl shadow-sm border border-border p-5 space-y-4">
       <div>
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-bold text-gray-800">실시간 참여 현황</h3>

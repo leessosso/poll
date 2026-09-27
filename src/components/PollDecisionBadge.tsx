@@ -28,7 +28,7 @@ export default function PollDecisionBadge({ poll }: PollDecisionBadgeProps) {
     return (
       <div
         className={`rounded-xl px-4 py-3 text-center border ${
-          passed ? 'bg-primary-light border-primary/20' : 'bg-red-50 border-red-200'
+          passed ? 'bg-primary-soft border-primary/20' : 'bg-red-50 border-red-200'
         }`}
       >
         <p className={`font-bold ${passed ? 'text-primary' : 'text-red-600'}`}>

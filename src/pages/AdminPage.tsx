@@ -32,7 +32,7 @@ export default function AdminPage() {
   if (!authed) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow-sm p-8 w-full max-w-sm">
+        <div className="bg-surface rounded-2xl shadow-sm border border-border p-8 w-full max-w-sm">
           <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">관리자 로그인</h1>
           <p className="text-gray-400 text-sm text-center mb-6">등촌교회 2층년회 투표 관리</p>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -47,7 +47,7 @@ export default function AdminPage() {
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button
               type="submit"
-              className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark"
+              className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-hover"
             >
               입장
             </button>
@@ -106,8 +106,8 @@ function AdminDashboard() {
     <div className="min-h-screen bg-background">
       <header className="bg-primary text-white px-5 py-4 shadow flex items-center justify-between">
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
-        <div className="flex items-center gap-2 bg-primary-dark rounded-full px-3 py-1">
-          <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+        <div className="flex items-center gap-2 bg-white/15 rounded-full px-3 py-1">
+          <span className="w-2 h-2 bg-accent rounded-full animate-pulse" />
           <span className="text-sm font-medium">
             진입 {visitorCount}명 · 현재 {presenceCount}명
           </span>
@@ -117,7 +117,7 @@ function AdminDashboard() {
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         <button
           onClick={() => setShowCreate(true)}
-          className="w-full bg-primary text-white py-4 rounded-2xl font-semibold text-lg hover:bg-primary-dark shadow-sm"
+          className="w-full bg-primary text-white py-4 rounded-2xl font-semibold text-lg hover:bg-primary-hover shadow-sm"
         >
           + 새 투표 만들기
         </button>

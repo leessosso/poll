@@ -44,7 +44,7 @@ export default function RosterClaimGate({ voters, claimedIds, loading, onClaimed
   };
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+    <div className="bg-surface rounded-2xl p-6 shadow-sm border border-border">
       <h2 className="text-xl font-bold text-gray-800 mb-2">입장 이름을 선택해 주세요</h2>
       <p className="text-sm text-gray-500 leading-relaxed mb-5">
         화면에 나온 입장 코드를 입력하고 본인 이름을 고르면 이번 모임 투표 인원에 포함됩니다.
@@ -94,7 +94,7 @@ export default function RosterClaimGate({ voters, claimedIds, loading, onClaimed
                       setVoterId(voter.id);
                       setQuery(voter.name);
                     }}
-                    className="block w-full px-4 py-3 text-left text-gray-800 hover:bg-primary-light"
+                    className="block w-full px-4 py-3 text-left text-gray-800 hover:bg-primary-soft"
                   >
                     {voter.name}
                   </button>

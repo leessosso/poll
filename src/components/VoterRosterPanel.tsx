@@ -135,7 +135,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
   };
 
   return (
-    <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4">
+    <section className="bg-surface rounded-2xl shadow-sm border border-border p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-bold text-gray-800">현장 입장</h2>
