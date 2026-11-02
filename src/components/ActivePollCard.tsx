@@ -3,7 +3,6 @@ import { getOptions, hasVoted } from '../lib/poll-utils';
 import type { Poll } from '../types';
 import PollCountdown from './PollCountdown';
 import { QuorumProgress } from './PollDecisionBadge';
-import ResultsBar from './ResultsBar';
 import VoteConfirmModal from './VoteConfirmModal';
 
 interface ActivePollCardProps {
@@ -49,11 +48,7 @@ export default function ActivePollCard({
             <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center text-green-700 text-sm font-medium mb-4">
               ✓ 투표 완료
             </div>
-            {poll.showResults ? (
-              <ResultsBar poll={poll} />
-            ) : (
-              <p className="text-center text-sm text-gray-400">결과는 투표 종료 후 공개됩니다</p>
-            )}
+            <p className="text-center text-sm text-gray-400">결과는 투표 종료 후 공개됩니다</p>
           </div>
         ) : (
           <div className={`grid gap-3 ${poll.type === 'yesno' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1'}`}>

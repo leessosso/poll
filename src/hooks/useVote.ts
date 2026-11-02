@@ -1,8 +1,6 @@
 import { useState } from 'react';
-import { doc, runTransaction } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { hasVoted, markVoted } from '../lib/poll-utils';
-import { castAttendanceVote, castRosterVote } from '../lib/vote-service';
+import { castAttendanceVote, castOpenVote, castRosterVote } from '../lib/vote-service';
 import type { Poll, RosterClaim, VoterSession } from '../types';
 
 interface UseVoteResult {
@@ -45,15 +43,7 @@ export function useVote(): UseVoteResult {
       } else if (poll.eligibilityMode === 'roster') {
         await castRosterVote(poll, choice, claim!);
       } else {
-        const pollRef = doc(db, 'polls', poll.id);
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(pollRef);
-          if (!snap.exists()) return;
-          const current = snap.data().results ?? {};
-          tx.update(pollRef, {
-            [`results.${choice}`]: (current[choice] ?? 0) + 1,
-          });
-        });
+        await castOpenVote(poll, choice);
         markVoted(poll.id);
       }
       return true;

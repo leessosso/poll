@@ -11,14 +11,23 @@ export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
 
   return {
     id: doc.id,
-    ...data,
+    title: data.title ?? '',
     type,
     options,
     status: data.status ?? 'waiting',
     createdAt: data.createdAt ?? 0,
-    results: data.results ?? {},
+    // 레거시 results 필드는 투표 문서에 남아 있어도 화면에 올리지 않는다.
+    results: {},
+    castCount: typeof data.castCount === 'number' ? data.castCount : 0,
     showResults: data.showResults ?? false,
     eligibilityMode: data.eligibilityMode ?? 'open',
     allowAbstain,
-  } as Poll;
+    eventId: data.eventId,
+    durationSeconds: data.durationSeconds,
+    startedAt: data.startedAt,
+    endsAt: data.endsAt,
+    closedAt: data.closedAt,
+    quorumTarget: typeof data.quorumTarget === 'number' ? data.quorumTarget : undefined,
+    passRatio: typeof data.passRatio === 'number' ? data.passRatio : undefined,
+  };
 }

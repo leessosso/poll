@@ -1,0 +1,412 @@
+import { readFileSync } from 'node:fs';
+import { after, before, beforeEach, describe, test } from 'node:test';
+import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
+import { get, ref, remove, set, update } from 'firebase/database';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  runTransaction,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore';
+
+const PROJECT_ID = 'demo-dcc-poll';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+function emulatorHost(name, fallback) {
+  const raw = process.env[name] ?? fallback;
+  const [host, port] = raw.split(':');
+  return { host, port: Number(port) };
+}
+
+let testEnv;
+
+function voter(uid = 'voter-1') {
+  return testEnv.authenticatedContext(uid).firestore();
+}
+
+function admin() {
+  return testEnv.authenticatedContext('admin-1', { admin: true }).firestore();
+}
+
+function unauth() {
+  return testEnv.unauthenticatedContext().firestore();
+}
+
+function pollData(overrides = {}) {
+  const now = Date.now();
+  return {
+    title: '안건',
+    type: 'yesno',
+    options: ['찬성', '반대', '기권'],
+    status: 'active',
+    createdAt: now,
+    showResults: false,
+    eligibilityMode: 'roster',
+    allowAbstain: true,
+    eventId: '',
+    durationSeconds: 180,
+    startedAt: now - 1000,
+    endsAt: now + 60_000,
+    castCount: 0,
+    passRatio: 0.5,
+    ...overrides,
+  };
+}
+
+function counts(overrides = {}) {
+  return { counts: { 찬성: 0, 반대: 0, 기권: 0, ...overrides } };
+}
+
+async function seed(write) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await write(context.firestore());
+  });
+}
+
+before(async () => {
+  const firestore = emulatorHost('FIRESTORE_EMULATOR_HOST', '127.0.0.1:8080');
+  const database = emulatorHost('FIREBASE_DATABASE_EMULATOR_HOST', '127.0.0.1:9000');
+  testEnv = await initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    firestore: {
+      rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'),
+      host: firestore.host,
+      port: firestore.port,
+    },
+    database: {
+      rules: readFileSync(new URL('../database.rules.json', import.meta.url), 'utf8'),
+      host: database.host,
+      port: database.port,
+    },
+  });
+});
+
+after(async () => {
+  if (testEnv) await testEnv.cleanup();
+});
+
+beforeEach(async () => {
+  await testEnv.clearFirestore();
+  await testEnv.clearDatabase();
+});
+
+describe('firestore rules', () => {
+  test('인증 없는 읽기와 다른 컬렉션 쓰기는 거부한다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1'), pollData());
+      await setDoc(doc(db, 'attendanceRawEvents/event_' + UUID), { secret: true });
+    });
+
+    await assertFails(getDoc(doc(unauth(), 'polls/poll1')));
+    await assertFails(getDoc(doc(voter(), 'attendanceRawEvents/event_' + UUID)));
+    await assertFails(setDoc(doc(voter(), 'meeting/current'), { roomCode: '1234', updatedAt: Date.now() }));
+    await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
+    await assertFails(setDoc(doc(voter(), 'polls/new'), pollData({ status: 'waiting', castCount: 0 })));
+  });
+
+  test('관리자는 투표와 명단과 입장 코드를 만들고 투표자는 명단을 지우지 못한다', async () => {
+    const now = Date.now();
+    const db = admin();
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'polls/poll-admin'), pollData({ status: 'waiting', startedAt: null, endsAt: null }));
+    batch.set(doc(db, 'polls/poll-admin/tally/current'), counts());
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(setDoc(doc(db, 'voters/v1'), {
+      name: '김철수',
+      externalQrId: '',
+      active: true,
+      createdAt: now,
+    }));
+    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '1234', updatedAt: now }));
+    await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
+  });
+
+  test('현장 입장은 비어 있는 이름에만 가능하고 선택 필드는 거부한다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'voters/v1'), {
+        name: '김철수',
+        externalQrId: '',
+        active: true,
+        createdAt: 1,
+      });
+    });
+
+    const claim = {
+      voterId: 'v1',
+      voterName: '김철수',
+      claimedAt: Date.now(),
+      claimToken: UUID,
+      authUid: 'voter-1',
+    };
+    await assertSucceeds(setDoc(doc(voter(), 'checkins/v1'), claim));
+    await assertFails(setDoc(doc(voter('voter-2'), 'checkins/v1'), { ...claim, authUid: 'voter-2' }));
+    await assertFails(setDoc(doc(voter('voter-2'), 'checkins/v2'), {
+      ...claim,
+      voterId: 'v2',
+      authUid: 'voter-2',
+      choice: '찬성',
+    }));
+  });
+
+  test('명단 투표는 한 칸만 올리고 참여 문서에 선택을 남기지 않는다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1'), pollData());
+      await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'checkins/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        claimedAt: 1,
+        claimToken: UUID,
+        authUid: 'voter-1',
+      });
+      await setDoc(doc(db, 'polls/poll1/participation/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+
+    await assertFails(rosterVote(voter('voter-2'), 'voter-2', '찬성'));
+    await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성'));
+    await assertFails(rosterVote(voter(), 'voter-1', '반대'));
+    await assertFails(getDocs(collection(voter(), 'polls/poll1/participation')));
+    await assertSucceeds(getDoc(doc(voter(), 'polls/poll1/participation/v1')));
+  });
+
+  test('집계를 두 칸 올리거나 참여 문서에 선택 필드를 쓰면 거부한다', async () => {
+    await seedRoster();
+    const db = voter();
+    await assertFails(runTransaction(db, async (tx) => {
+      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+        status: 'completed',
+        completedAt: Date.now(),
+        choice: '찬성',
+      });
+      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/tally/current'), { 'counts.찬성': increment(1) });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+    }));
+
+    await assertFails(runTransaction(db, async (tx) => {
+      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+        status: 'completed',
+        completedAt: Date.now(),
+      });
+      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/tally/current'), {
+        'counts.찬성': increment(1),
+        'counts.반대': increment(1),
+      });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+    }));
+
+    await assertFails(runTransaction(db, async (tx) => {
+      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+        status: 'completed',
+        completedAt: Date.now(),
+      });
+      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/tally/current'), {
+        'counts.찬성': increment(2),
+      });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+    }));
+
+    await assertFails(runTransaction(db, async (tx) => {
+      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+        status: 'completed',
+        completedAt: Date.now(),
+      });
+      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/tally/current'), {
+        'counts.찬성': increment(1),
+        voterId: 'v1',
+      });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1', choice: '찬성' });
+    }));
+  });
+
+  test('진행 중 집계는 관리자만 읽고 마감 후 공개일 때만 투표자가 읽는다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/open-poll'), pollData({ showResults: true }));
+      await setDoc(doc(db, 'polls/open-poll/tally/current'), counts({ 찬성: 3 }));
+      await setDoc(doc(db, 'polls/closed-shown'), pollData({ status: 'closed', showResults: true, closedAt: 2 }));
+      await setDoc(doc(db, 'polls/closed-shown/tally/current'), counts({ 찬성: 2 }));
+      await setDoc(doc(db, 'polls/closed-hidden'), pollData({ status: 'closed', showResults: false, closedAt: 2 }));
+      await setDoc(doc(db, 'polls/closed-hidden/tally/current'), counts({ 찬성: 2 }));
+    });
+
+    await assertFails(getDoc(doc(voter(), 'polls/open-poll/tally/current')));
+    await assertSucceeds(getDoc(doc(admin(), 'polls/open-poll/tally/current')));
+    await assertSucceeds(getDoc(doc(voter(), 'polls/closed-shown/tally/current')));
+    await assertFails(getDoc(doc(voter(), 'polls/closed-hidden/tally/current')));
+    await assertSucceeds(getDoc(doc(voter(), 'polls/open-poll')));
+  });
+
+  test('레거시 results 필드가 남은 투표 문서는 읽지 못한다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/legacy'), { ...pollData(), results: { 찬성: 1 } });
+    });
+    await assertFails(getDoc(doc(voter(), 'polls/legacy')));
+    await assertFails(getDoc(doc(admin(), 'polls/legacy')));
+  });
+
+  test('누구나 참여 투표는 같은 계정으로 한 번만 집계된다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll-open'), pollData({ eligibilityMode: 'open' }));
+      await setDoc(doc(db, 'polls/poll-open/tally/current'), counts());
+    });
+    await assertSucceeds(openVote(voter(), 'voter-1'));
+    await assertFails(openVote(voter(), 'voter-1'));
+    await assertSucceeds(openVote(voter('voter-2'), 'voter-2'));
+  });
+
+  test('출석 투표는 세션의 유권자만 한 칸 올린다', async () => {
+    const now = Date.now();
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll-att'), pollData({ eligibilityMode: 'attendance', eventId: 'elder-vote' }));
+      await setDoc(doc(db, 'polls/poll-att/tally/current'), counts());
+      await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'attendanceSessions/session_' + UUID), {
+        eventId: 'elder-vote',
+        voterId: 'v1',
+        voterName: '김철수',
+        checkedInAt: now,
+        expiresAt: now + SESSION_TTL_MS,
+        status: 'active',
+      });
+      await setDoc(doc(db, 'polls/poll-att/participation/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+
+    await assertSucceeds(attendanceVote(voter(), 'voter-1'));
+    await assertFails(getDocs(collection(voter(), 'attendanceSessions')));
+    await assertSucceeds(getDoc(doc(voter(), 'attendanceSessions/session_' + UUID)));
+  });
+
+  test('results 필드가 없는 투표 목록은 인증된 사용자가 읽는다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1'), pollData({ status: 'waiting' }));
+    });
+    await assertSucceeds(getDocs(collection(voter(), 'polls')));
+    await assertFails(getDocs(collection(unauth(), 'polls')));
+  });
+});
+
+describe('realtime database rules', () => {
+  const sessionId = `session_${UUID}`;
+  const clientId = `client_${UUID}`;
+
+  test('인증 없는 읽기 쓰기와 다른 경로는 거부한다', async () => {
+    const db = testEnv.unauthenticatedContext().database();
+    await assertFails(get(ref(db, 'presence')));
+    await assertFails(set(ref(db, 'presence/' + sessionId), presenceBody('nobody')));
+    await assertFails(set(ref(db, 'stolen'), { any: true }));
+  });
+
+  test('본인 presence 와 오늘 방문 기록만 정해진 필드로 쓴다', async () => {
+    const db = testEnv.authenticatedContext('voter-1').database();
+    const presenceRef = ref(db, `presence/${sessionId}`);
+    await assertSucceeds(set(presenceRef, presenceBody('voter-1')));
+    await assertSucceeds(update(presenceRef, { lastSeenAt: Date.now() }));
+    await assertFails(update(presenceRef, { choice: '찬성' }));
+    const other = testEnv.authenticatedContext('voter-2').database();
+    await assertFails(remove(ref(other, `presence/${sessionId}`)));
+    await assertSucceeds(remove(presenceRef));
+
+    const visitorRef = ref(db, `visitors/2026-11-02/${clientId}`);
+    await assertSucceeds(set(visitorRef, {
+      authUid: 'voter-1',
+      firstSeenAt: 1,
+      lastSeenAt: 1,
+      visitCount: 1,
+    }));
+    await assertSucceeds(update(visitorRef, { lastSeenAt: 2, visitCount: 2 }));
+    await assertFails(set(ref(db, `visitors/2026-11-02/${clientId}`), {
+      authUid: 'voter-1',
+      firstSeenAt: 1,
+      lastSeenAt: 2,
+      visitCount: 2,
+      choice: '찬성',
+    }));
+    await assertSucceeds(get(ref(db, 'visitors/2026-11-02')));
+  });
+});
+
+function presenceBody(uid) {
+  return {
+    clientId: `client_${UUID}`,
+    authUid: uid,
+    connectedAt: 10,
+    lastSeenAt: 10,
+  };
+}
+
+async function seedRoster() {
+  await seed(async (db) => {
+    await setDoc(doc(db, 'polls/poll1'), pollData());
+    await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+    await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
+    await setDoc(doc(db, 'checkins/v1'), {
+      voterId: 'v1',
+      voterName: '김철수',
+      claimedAt: 1,
+      claimToken: UUID,
+      authUid: 'voter-1',
+    });
+    await setDoc(doc(db, 'polls/poll1/participation/v1'), {
+      voterId: 'v1',
+      voterName: '김철수',
+      status: 'pending',
+      createdAt: 1,
+    });
+  });
+}
+
+function rosterVote(db, uid, choice) {
+  return runTransaction(db, async (tx) => {
+    tx.update(doc(db, 'polls/poll1/participation/v1'), {
+      status: 'completed',
+      completedAt: Date.now(),
+    });
+    tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll1/tally/current'), { [`counts.${choice}`]: increment(1) });
+    tx.set(doc(db, `polls/poll1/voteGuards/${uid}`), { voterId: 'v1' });
+  });
+}
+
+function openVote(db, uid) {
+  return runTransaction(db, async (tx) => {
+    tx.update(doc(db, 'polls/poll-open'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll-open/tally/current'), { 'counts.찬성': increment(1) });
+    tx.set(doc(db, `polls/poll-open/voteGuards/${uid}`), { createdAt: Date.now() });
+  });
+}
+
+function attendanceVote(db, uid) {
+  return runTransaction(db, async (tx) => {
+    tx.update(doc(db, 'polls/poll-att/participation/v1'), {
+      status: 'completed',
+      completedAt: Date.now(),
+    });
+    tx.update(doc(db, 'polls/poll-att'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll-att/tally/current'), { 'counts.찬성': increment(1) });
+    tx.set(doc(db, `polls/poll-att/voteGuards/${uid}`), {
+      voterId: 'v1',
+      sessionId: 'session_' + UUID,
+    });
+  });
+}

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, deleteDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { isAdminAccount } from '../lib/admin-auth';
+import { auth, db } from '../lib/firebase';
+import { useAdminAuth } from '../hooks/useAdminAuth';
 import { usePolls } from '../hooks/usePolls';
 import { usePresenceStats } from '../hooks/usePresenceStats';
 import type { Poll } from '../types';
@@ -10,58 +13,93 @@ import PollParticipationPanel from '../components/PollParticipationPanel';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
 
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? 'admin1234';
-
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(
-    () => sessionStorage.getItem('admin_authed') === 'true',
-  );
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const { ready, isAdmin, logout } = useAdminAuth();
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      sessionStorage.setItem('admin_authed', 'true');
-      setAuthed(true);
-    } else {
-      setError('비밀번호가 틀렸습니다');
-    }
-  };
-
-  if (!authed) {
+  if (!ready) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="bg-surface rounded-2xl shadow-sm border border-border p-8 w-full max-w-sm">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">관리자 로그인</h1>
-          <p className="text-gray-400 text-sm text-center mb-6">등촌교회 2층년회 투표 관리</p>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(''); }}
-              placeholder="비밀번호 입력"
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
-              autoFocus
-            />
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-hover"
-            >
-              입장
-            </button>
-          </form>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-gray-400">불러오는 중...</p>
       </div>
     );
   }
 
-  return <AdminDashboard />;
+  if (!isAdmin) return <AdminLogin />;
+  return <AdminDashboard onLogout={() => void logout()} />;
 }
 
-function AdminDashboard() {
-  const { polls } = usePolls();
+function AdminLogin() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const token = await credential.user.getIdTokenResult(true);
+      if (!isAdminAccount(credential.user, token.claims)) {
+        await signOut(auth);
+        setError('관리자 권한이 없는 계정입니다');
+      }
+    } catch (err) {
+      const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found' || code === 'auth/invalid-email') {
+        setError('이메일 또는 비밀번호가 틀렸습니다');
+      } else if (code === 'auth/operation-not-allowed') {
+        setError('이메일 로그인이 꺼져 있습니다. Firebase 콘솔에서 Email/Password 제공자를 켜 주세요.');
+      } else {
+        setError(err instanceof Error ? err.message : '로그인하지 못했습니다');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <div className="bg-surface rounded-2xl shadow-sm border border-border p-8 w-full max-w-sm">
+        <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">관리자 로그인</h1>
+        <p className="text-gray-400 text-sm text-center mb-6">등촌교회 2층년회 투표 관리</p>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setError(''); }}
+            placeholder="이메일"
+            autoComplete="username"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
+            autoFocus
+            required
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setError(''); }}
+            placeholder="비밀번호 입력"
+            autoComplete="current-password"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
+            required
+          />
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-hover disabled:opacity-50"
+          >
+            {submitting ? '확인 중...' : '입장'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AdminDashboard({ onLogout }: { onLogout: () => void }) {
+  const { polls } = usePolls('admin');
   const { presenceCount, visitorCount } = usePresenceStats();
   const [showCreate, setShowCreate] = useState(false);
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
@@ -106,11 +144,16 @@ function AdminDashboard() {
     <div className="min-h-screen bg-background">
       <header className="bg-primary text-white px-5 py-4 shadow flex items-center justify-between">
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
-        <div className="flex items-center gap-2 bg-white/15 rounded-full px-3 py-1">
-          <span className="w-2 h-2 bg-accent rounded-full animate-pulse" />
-          <span className="text-sm font-medium">
-            진입 {visitorCount}명 · 현재 {presenceCount}명
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-white/15 rounded-full px-3 py-1">
+            <span className="w-2 h-2 bg-accent rounded-full animate-pulse" />
+            <span className="text-sm font-medium">
+              진입 {visitorCount}명 · 현재 {presenceCount}명
+            </span>
+          </div>
+          <button type="button" onClick={onLogout} className="text-sm text-white/80 underline">
+            로그아웃
+          </button>
         </div>
       </header>
 

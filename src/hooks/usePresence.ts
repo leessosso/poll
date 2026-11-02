@@ -8,8 +8,9 @@ import {
   onValue,
   set,
 } from 'firebase/database';
-import { rtdb } from '../lib/firebase';
+import { auth, rtdb } from '../lib/firebase';
 import { getClientId, getSessionId } from '../lib/client-id';
+import { ensureVoterUser } from '../lib/voter-auth';
 
 /** KST 기준 오늘 날짜를 YYYY-MM-DD 형식으로 반환 */
 function getTodayKST(): string {
@@ -34,36 +35,47 @@ export function usePresence(): void {
     const visitorRef = ref(rtdb, `visitors/${today}/${clientId}`);
     const presenceRef = ref(rtdb, `presence/${sessionId}`);
     const connectedRef = ref(rtdb, '.info/connected');
+    let cancelled = false;
+    let unsubConnected = () => {};
 
-    // 방문 기록 갱신 (누적)
-    void runRtdbTransaction(visitorRef, (current) => {
-      const now = Date.now();
-      if (current) {
-        return { ...current, lastSeenAt: now, visitCount: (current.visitCount ?? 0) + 1 };
-      }
-      return { firstSeenAt: now, lastSeenAt: now, visitCount: 1 };
-    });
-
-    // Firebase 연결 상태 감지 → 연결될 때마다 presence 재등록
-    // (재연결 시에도 onDisconnect + set을 다시 설정해야 함)
-    const unsubConnected = onValue(connectedRef, (snap) => {
-      if (snap.val() !== true) return;
-      void registerPresence();
-    });
-
-    async function registerPresence() {
+    void (async () => {
       try {
-        // onDisconnect 먼저 등록한 뒤 set해야 원자적으로 동작함
-        await onDisconnect(presenceRef).remove();
-        await set(presenceRef, {
-          clientId,
-          connectedAt: Date.now(),
-          lastSeenAt: Date.now(),
-        });
+        await ensureVoterUser();
       } catch (err) {
-        console.error('[presence] registration failed', err);
+        console.error('[presence] auth failed', err);
+        return;
       }
-    }
+      if (cancelled) return;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
+      void runRtdbTransaction(visitorRef, (current) => {
+        const now = Date.now();
+        if (current) {
+          return { ...current, authUid: uid, lastSeenAt: now, visitCount: (current.visitCount ?? 0) + 1 };
+        }
+        return { authUid: uid, firstSeenAt: now, lastSeenAt: now, visitCount: 1 };
+      });
+
+      unsubConnected = onValue(connectedRef, (snap) => {
+        if (snap.val() !== true) return;
+        void registerPresence();
+      });
+
+      async function registerPresence() {
+        try {
+          await onDisconnect(presenceRef).remove();
+          await set(presenceRef, {
+            clientId,
+            authUid: uid,
+            connectedAt: Date.now(),
+            lastSeenAt: Date.now(),
+          });
+        } catch (err) {
+          console.error('[presence] registration failed', err);
+        }
+      }
+    })();
 
     function touchPresence() {
       const ts = Date.now();
@@ -75,6 +87,7 @@ export function usePresence(): void {
     document.addEventListener('visibilitychange', touchPresence);
 
     return () => {
+      cancelled = true;
       unsubConnected();
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', touchPresence);

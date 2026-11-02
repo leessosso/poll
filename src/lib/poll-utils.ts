@@ -6,7 +6,11 @@ export function getOptions(poll: Poll): string[] {
 }
 
 export function getPollTotal(poll: Poll): number {
-  return Object.values(poll.results ?? {}).reduce((a, b) => a + b, 0);
+  const results = poll.results ?? {};
+  if (Object.keys(results).length > 0) {
+    return Object.values(results).reduce((sum, count) => sum + count, 0);
+  }
+  return poll.castCount ?? 0;
 }
 
 export function isPollExpired(poll: Poll, now = Date.now()): boolean {
