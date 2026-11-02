@@ -140,6 +140,10 @@ VITE_FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
 
 Firestore 규칙과 Realtime Database 규칙은 저장소의 `firestore.rules`, `database.rules.json`에 있다. `firebase.json`이 둘을 가리킨다. `npm run deploy`는 GitHub Pages만 갱신하고 규칙은 배포하지 않는다.
 
+`/admin`의 기본 버튼은 2청년회 셸로 보낸다. 셸이 ADMIN 또는 PASTOR이고 회원(mid)이 하나 연결되어 있으면, 60초 일회용 코드를 주소 프래그먼트로 돌려준다. 투표 앱은 그 코드만으로 `https://youth2-space.vercel.app/api/poll/firebase-token`에 교환하고 `signInWithCustomToken`을 호출한다. 쿠키는 보내지 않는다. uid는 `shell_<mid>`이고 클레임은 `{ "admin": true, "mid" }`이다. 규칙은 `admin == true`만 본다. 규격은 [`docs/security-shell-admin.md`](docs/security-shell-admin.md)에 있다.
+
+이메일/비밀번호는 셸이 죽었을 때의 비상 로그인이다. 화면에서는 "비상 로그인"으로만 연다. 같은 관리자 클레임이 있어야 한다.
+
 규칙 테스트:
 
 ```bash
@@ -152,9 +156,14 @@ Java가 필요하다. Firestore/RTDB 에뮬레이터만 띄우며, `dcc-poll` �
 
 이 저장소를 받은 에이전트나 CI가 하면 안 된다. 프로젝트 소유자가 배포를 승인할 때 아래 순서로 한다.
 
-1. Authentication에서 Email/Password와 Anonymous를 켠다.
-2. 관리자 계정을 이메일/비밀번호로 한 명 만든다.
-3. 그 사용자에게 커스텀 클레임 `{ "admin": true }`를 넣는다. 서비스 계정은 로컬에서만 쓰고 저장소에 커밋하지 않는다.
+1. 셸(youth2-space) 서버 환경에 `dcc-poll` 서비스 계정을 넣는다. 이 저장소에는 넣지 않는다. 없으면 코드 교환이 `500`이다.
+   - `POLL_FIREBASE_PROJECT_ID` (비우면 `dcc-poll`)
+   - `POLL_FIREBASE_CLIENT_EMAIL`
+   - `POLL_FIREBASE_PRIVATE_KEY`
+   셸을 배포한 뒤, 투표 관리자는 셸 역할 ADMIN 또는 PASTOR이고 `members.userId`로 회원이 정확히 하나 연결돼 있어야 한다.
+2. Authentication에서 Email/Password(비상 로그인)와 Anonymous(투표자)를 켠다.
+3. 비상 로그인용 이메일/비밀번호 계정을 한 명 만든다. 셸이 정상일 때는 이 계정을 쓰지 않는다.
+4. 그 사용자에게 커스텀 클레임 `{ "admin": true }`를 넣는다. 서비스 계정은 로컬에서만 쓰고 저장소에 커밋하지 않는다. 셸 계정 `shell_<mid>`는 첫 커스텀 토큰 로그인 때 생기므로 미리 만들지 않는다.
 
 ```bash
 # FIREBASE_SERVICE_ACCOUNT_JSON, ADMIN_EMAIL 을 환경에만 두고 실행
@@ -172,15 +181,15 @@ console.log(user.uid);
 
 클레임을 쓰기 어려우면 `firestore.rules`의 `isAllowlistedAdmin()`과 `src/lib/admin-auth.ts`의 `ALLOWLISTED_ADMIN_EMAILS`를 같은 이메일로 같이 바꾼다. 둘 중 하나만 바꾸면 화면과 규칙이 어긋난다.
 
-4. Authentication 승인 도메인에 `leessosso.github.io`와 `dcc.leessosso.uk`를 넣는다.
-5. 아래 데이터 이전을 Admin SDK나 콘솔로 끝낸다. 규칙이 먼저 올라가면 `results`가 남은 투표가 하나라도 있을 때 투표 목록 쿼리 전체가 실패한다.
-6. 규칙을 배포한다. 사이트 배포와 별개다.
+5. Authentication 승인 도메인에 `leessosso.github.io`와 `dcc.leessosso.uk`를 넣는다.
+6. 아래 데이터 이전을 Admin SDK나 콘솔로 끝낸다. 규칙이 먼저 올라가면 `results`가 남은 투표가 하나라도 있을 때 투표 목록 쿼리 전체가 실패한다.
+7. 규칙을 배포한다. 사이트 배포와 별개다.
 
 ```bash
 npx firebase deploy --only firestore:rules,database --project dcc-poll
 ```
 
-7. `.env`에 위의 Firebase 웹 설정만 넣고 `npm run deploy`로 사이트를 배포한다. `VITE_ADMIN_PASSWORD`는 넣지 않는다.
+8. `.env`에 위의 Firebase 웹 설정만 넣고 `npm run deploy`로 사이트를 배포한다. `VITE_ADMIN_PASSWORD`는 넣지 않는다. 셸 환경 변수를 사이트 `.env`에 넣지 않는다. 사이트보다 셸이 먼저 떠 있어야 관리자 버튼이 동작한다.
 
 ### 데이터 이전
 
@@ -229,6 +238,6 @@ npm run deploy
 
 - 장로 선출 투표 흐름은 현재 클라이언트 + Firestore 기반으로 동작 확인이 가능하게 구현되어 있습니다.
 - 보안 규칙과 관리자 로그인은 위 "보안 규칙과 관리자 로그인"을 따른다. 투표 쓰기는 아직 클라이언트에 있다. Cloud Functions로 옮기는 일은 셸 로그인 이후다.
-- 관리자 비밀번호는 번들에 넣지 않는다. `/admin`은 Firebase Email/Password와 `admin` 커스텀 클레임을 쓴다.
+- 관리자 비밀번호는 번들에 넣지 않는다. `/admin`은 2청년회 셸 SSO가 기본이고, 이메일/비밀번호는 비상 로그인이다. 둘 다 `admin` 커스텀 클레임이 있어야 한다.
 - QR 출석 스캐너의 실제 연동 방식은 아직 확정 전입니다. 한자리에 모이는 투표는 `현장 명단`을 쓰고, QR 세션은 관리자 화면에서 테스트로 만들 수 있습니다.
 - 헤더의 진입·현재 인원은 브라우저·탭 수입니다. 입장 코드로 이름을 고른 인원은 명단의 `입장함`과 투표 시작 후 참여 현황에서 확인합니다.

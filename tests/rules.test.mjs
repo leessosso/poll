@@ -35,6 +35,10 @@ function admin() {
   return testEnv.authenticatedContext('admin-1', { admin: true }).firestore();
 }
 
+function shellAdmin() {
+  return testEnv.authenticatedContext('shell_m1', { admin: true, mid: 'm1' }).firestore();
+}
+
 function unauth() {
   return testEnv.unauthenticatedContext().firestore();
 }
@@ -109,6 +113,35 @@ describe('firestore rules', () => {
     await assertFails(setDoc(doc(voter(), 'meeting/current'), { roomCode: '1234', updatedAt: Date.now() }));
     await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
     await assertFails(setDoc(doc(voter(), 'polls/new'), pollData({ status: 'waiting', castCount: 0 })));
+  });
+
+  test('셸 uid와 admin·mid 클레임은 관리자 작업을 하고 익명과 비관리자는 못한다', async () => {
+    const now = Date.now();
+    const db = shellAdmin();
+    await assertSucceeds(setDoc(doc(db, 'polls/poll-shell'), pollData({
+      status: 'waiting',
+      startedAt: null,
+      endsAt: null,
+      castCount: 0,
+    })));
+    await assertSucceeds(setDoc(doc(db, 'polls/poll-shell/tally/current'), counts()));
+    await assertSucceeds(setDoc(doc(db, 'voters/shell-voter'), {
+      name: '이영희',
+      externalQrId: '',
+      active: true,
+      createdAt: now,
+    }));
+    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '5678', updatedAt: now }));
+    await assertSucceeds(deleteDoc(doc(db, 'voters/shell-voter')));
+
+    const anon = testEnv.authenticatedContext('anon-voter').firestore();
+    const member = testEnv.authenticatedContext('member-1', { admin: false, mid: 'm9' }).firestore();
+    const waiting = pollData({ status: 'waiting', startedAt: null, endsAt: null, castCount: 0 });
+    await assertFails(setDoc(doc(anon, 'polls/by-anon'), waiting));
+    await assertFails(setDoc(doc(member, 'polls/by-member'), waiting));
+    await assertFails(setDoc(doc(member, 'meeting/current'), { roomCode: '0000', updatedAt: now }));
+    await assertFails(deleteDoc(doc(anon, 'voters/v1')));
+    await assertFails(getDoc(doc(unauth(), 'polls/poll-shell')));
   });
 
   test('관리자는 투표와 명단과 입장 코드를 만들고 투표자는 명단을 지우지 못한다', async () => {

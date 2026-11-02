@@ -2,6 +2,8 @@ rules_version = '2';
 
 // dcc-poll 최소 보안 규칙.
 // 관리자: request.auth.token.admin == true (커스텀 클레임).
+// 셸 커스텀 토큰 uid는 shell_<mid> 이고 클레임은 { admin: true, mid } 다.
+// uid 형식은 검사하지 않는다. admin 클레임만 본다.
 // 임시 대체: isAllowlistedAdmin()을 이메일/uid 비교로 바꾸고, src/lib/admin-auth.ts 도 같이 수정한다.
 // 투표자: 익명 로그인. admin 클레임이 없는 인증 사용자만 투표 전이를 할 수 있다.
 // 선택값과 유권자 id는 어떤 문서에도 함께 두지 않는다.
