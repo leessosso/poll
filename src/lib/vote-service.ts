@@ -20,6 +20,10 @@ const MEETING_DOC = doc(db, 'meeting', 'current');
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
+function hasCheckinOwner(data: Record<string, unknown> | undefined): boolean {
+  return typeof data?.authUid === 'string' && data.authUid.length > 0;
+}
+
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('인증이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.');
@@ -125,6 +129,8 @@ export async function startPollWithParticipation(poll: Poll): Promise<void> {
     const checkinsSnap = await getDocs(collection(db, 'checkins'));
     checkinsSnap.docs.forEach((checkinDoc) => {
       const data = checkinDoc.data();
+      // authUid 없는 예전 체크인은 자리 점유가 아니므로 이번 투표 인원에 넣지 않는다.
+      if (!hasCheckinOwner(data)) return;
       batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
         voterId: data.voterId ?? checkinDoc.id,
         voterName: data.voterName ?? '이름 없음',
@@ -277,7 +283,9 @@ export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<R
     const [meetingSnap, checkinSnap] = await Promise.all([tx.get(MEETING_DOC), tx.get(checkinRef)]);
     const expected = meetingSnap.exists() ? String(meetingSnap.data().roomCode ?? '') : '';
     if (!expected || expected !== normalizedCode) throw new Error('입장 코드가 맞지 않습니다.');
-    if (checkinSnap.exists()) throw new Error('이미 다른 분이 선택한 이름입니다.');
+    if (checkinSnap.exists() && hasCheckinOwner(checkinSnap.data())) {
+      throw new Error('이미 다른 분이 선택한 이름입니다.');
+    }
 
     tx.set(checkinRef, {
       voterId: voter.id,

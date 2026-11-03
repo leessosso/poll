@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
@@ -285,12 +286,83 @@ describe('firestore rules', () => {
     await assertSucceeds(getDoc(doc(voter(), 'polls/open-poll')));
   });
 
-  test('레거시 results 필드가 남은 투표 문서는 읽지 못한다', async () => {
+  test('레거시 results 가 남은 투표도 목록에서 읽고 그 필드는 고치지 못한다', async () => {
     await seed(async (db) => {
-      await setDoc(doc(db, 'polls/legacy'), { ...pollData(), results: { 찬성: 1 } });
+      await setDoc(doc(db, 'polls/legacy'), {
+        ...pollData({ status: 'closed', showResults: false, closedAt: 2 }),
+        results: { 찬성: 1 },
+      });
+      await setDoc(doc(db, 'polls/legacy/tally/current'), counts({ 찬성: 1 }));
+      await setDoc(doc(db, 'polls/clean'), pollData({ status: 'waiting', startedAt: null, endsAt: null }));
     });
-    await assertFails(getDoc(doc(voter(), 'polls/legacy')));
-    await assertFails(getDoc(doc(admin(), 'polls/legacy')));
+
+    const listed = await assertSucceeds(getDocs(collection(voter(), 'polls')));
+    assert.equal(listed.size, 2);
+    await assertSucceeds(getDoc(doc(admin(), 'polls/legacy')));
+    await assertFails(getDoc(doc(voter(), 'polls/legacy/tally/current')));
+    await assertSucceeds(updateDoc(doc(admin(), 'polls/legacy'), { title: '지난 안건' }));
+    await assertFails(updateDoc(doc(admin(), 'polls/legacy'), { results: { 찬성: 9 } }));
+    await assertFails(setDoc(doc(admin(), 'polls/new-results'), {
+      ...pollData({ status: 'waiting', startedAt: null, endsAt: null, castCount: 0 }),
+      results: { 찬성: 0 },
+    }));
+  });
+
+  test('authUid 없는 체크인은 목록을 막지 않고 새 입장으로만 덮어쓸 수 있다', async () => {
+    const nextToken = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1'), pollData());
+      await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'voters/v2'), { name: '이영희', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'checkins/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        claimedAt: 1,
+        claimToken: UUID,
+      });
+      await setDoc(doc(db, 'checkins/v2'), {
+        voterId: 'v2',
+        voterName: '이영희',
+        claimedAt: Date.now(),
+        claimToken: UUID,
+        authUid: 'voter-9',
+      });
+      await setDoc(doc(db, 'polls/poll1/participation/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+
+    await assertSucceeds(getDoc(doc(voter(), 'checkins/v1')));
+    await assertSucceeds(getDoc(doc(voter(), 'checkins/v2')));
+    const listed = await assertSucceeds(getDocs(collection(voter(), 'checkins')));
+    assert.equal(listed.size, 2);
+    await assertFails(rosterVote(voter(), 'voter-1', '찬성'));
+    await assertSucceeds(setDoc(doc(voter(), 'checkins/v1'), {
+      voterId: 'v1',
+      voterName: '김철수',
+      claimedAt: Date.now(),
+      claimToken: nextToken,
+      authUid: 'voter-1',
+    }));
+    await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성'));
+    await assertFails(setDoc(doc(voter('voter-2'), 'checkins/v1'), {
+      voterId: 'v1',
+      voterName: '김철수',
+      claimedAt: Date.now(),
+      claimToken: nextToken,
+      authUid: 'voter-2',
+    }));
+    await assertFails(setDoc(doc(voter(), 'checkins/v2'), {
+      voterId: 'v2',
+      voterName: '이영희',
+      claimedAt: Date.now(),
+      claimToken: nextToken,
+      authUid: 'voter-1',
+    }));
   });
 
   test('누구나 참여 투표는 같은 계정으로 한 번만 집계된다', async () => {
@@ -376,6 +448,50 @@ describe('realtime database rules', () => {
       choice: '찬성',
     }));
     await assertSucceeds(get(ref(db, 'visitors/2026-11-02')));
+  });
+
+  test('authUid 없는 presence 와 visitors 는 읽기와 새 쓰기를 막지 않는다', async () => {
+    const legacySession = 'session_bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    const legacyClient = 'client_bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.database();
+      await set(ref(adminDb, `presence/${legacySession}`), {
+        clientId: legacyClient,
+        connectedAt: 1,
+        lastSeenAt: 1,
+      });
+      await set(ref(adminDb, `visitors/2026-11-02/${legacyClient}`), {
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+        visitCount: 2,
+      });
+    });
+
+    const db = testEnv.authenticatedContext('voter-1').database();
+    const other = testEnv.authenticatedContext('voter-2').database();
+    const presence = await assertSucceeds(get(ref(db, 'presence')));
+    assert.equal(presence.child(legacySession).child('lastSeenAt').val(), 1);
+    assert.equal(presence.child(legacySession).child('authUid').val(), null);
+    await assertSucceeds(set(ref(db, `presence/session_${UUID}`), presenceBody('voter-1')));
+    await assertFails(remove(ref(other, `presence/${legacySession}`)));
+    const still = await assertSucceeds(get(ref(db, `presence/${legacySession}`)));
+    assert.equal(still.child('authUid').val(), null);
+    await assertSucceeds(set(ref(db, `presence/${legacySession}`), {
+      clientId: legacyClient,
+      authUid: 'voter-1',
+      connectedAt: 1,
+      lastSeenAt: 2,
+    }));
+    await assertFails(remove(ref(other, `presence/${legacySession}`)));
+    await assertSucceeds(set(ref(db, `visitors/2026-11-02/${legacyClient}`), {
+      authUid: 'voter-1',
+      firstSeenAt: 1,
+      lastSeenAt: 3,
+      visitCount: 3,
+    }));
+    const visitor = await assertSucceeds(get(ref(db, `visitors/2026-11-02/${legacyClient}`)));
+    assert.equal(visitor.child('visitCount').val(), 3);
+    assert.equal(visitor.child('authUid').val(), 'voter-1');
   });
 });
 

@@ -182,7 +182,17 @@ console.log(user.uid);
 클레임을 쓰기 어려우면 `firestore.rules`의 `isAllowlistedAdmin()`과 `src/lib/admin-auth.ts`의 `ALLOWLISTED_ADMIN_EMAILS`를 같은 이메일로 같이 바꾼다. 둘 중 하나만 바꾸면 화면과 규칙이 어긋난다.
 
 5. Authentication 승인 도메인에 `leessosso.github.io`와 `dcc.leessosso.uk`를 넣는다.
-6. 아래 데이터 이전을 Admin SDK나 콘솔로 끝낸다. 규칙이 먼저 올라가면 `results`가 남은 투표가 하나라도 있을 때 투표 목록 쿼리 전체가 실패한다.
+6. 데이터 이전은 추가만 한다. 삭제는 하지 않는다. `scripts/migrate-tally.mjs`가 `results`를 `tally/current`로 복사하고, `castCount`가 없을 때만 숫자를 채운다. 기본은 dry-run이다.
+
+```bash
+# firebase-admin 은 이 저장소 의존성이 아니다. 명령을 실행하는 폴더에만 설치한다.
+# FIREBASE_SERVICE_ACCOUNT_JSON 은 환경에만 둔다.
+node scripts/migrate-tally.mjs
+node scripts/migrate-tally.mjs --apply
+```
+
+`checkins`, RTDB `presence`, `visitors`, `polls.results`는 지우지 않는다. `authUid`가 없는 체크인은 새 입장으로 다시 고를 수 있고, 목록을 막지 않는다. `authUid`가 없는 presence/visitors는 남겨 두며, 읽기와 다른 키의 새 쓰기는 된다. `results`가 문서에 남아 있으면 로그인한 사용자는 투표 문서를 읽을 때 그 맵을 볼 수 있다. 새 투표는 이 필드를 만들지 않고, 공개 집계는 `tally/current`만 쓴다. 그래서 규칙을 올리기 전에 진행 중인 투표가 없어야 한다.
+
 7. 규칙을 배포한다. 사이트 배포와 별개다.
 
 ```bash
@@ -193,17 +203,15 @@ npx firebase deploy --only firestore:rules,database --project dcc-poll
 
 ### 데이터 이전
 
-실데이터에는 손대지 않은 상태의 절차다. 실행은 소유자만 한다.
+실데이터에는 손대지 않은 상태의 절차다. 실행은 소유자만 한다. 스크립트는 삭제하지 않는다.
 
-각 `polls/{id}`에 대해:
+각 `polls/{id}`에 대해 `scripts/migrate-tally.mjs`가 하는 일은 다음뿐이다.
 
-- `results` 맵을 `polls/{id}/tally/current` 문서 `{ counts: <그 맵> }`으로 복사한다. 키가 없으면 선택지별 `0`으로 만든다.
-- `castCount`가 없으면 `results` 값의 합으로 설정한다.
-- 투표 문서에서 `results` 필드를 삭제한다.
+- `tally/current`가 없으면 `{ counts }`를 만든다. `results`가 숫자 맵이면 그 값을 쓰고, 없으면 선택지별 `0`이다. 이미 있으면 덮어쓰지 않는다.
+- `castCount`가 없으면 `results` 합계(없으면 0)로 설정한다. 이미 있으면 유지한다.
+- `results` 필드는 그대로 둔다.
 
-`checkins`는 `authUid`가 없다. 규칙 배포 전에 체크인 문서를 지운다. 현장에서는 입장 코드와 이름을 다시 고른다. 이미 끝난 투표의 `participation`은 그대로 둔다.
-
-`presence`와 `visitors`는 접속 흔적이라 지워도 된다. 예전 방문 기록은 `authUid`가 없어 새 앱이 갱신하지 못할 수 있다.
+`checkins`에 `authUid`가 없는 문서는 자리 점유로 보지 않는다. 같은 이름으로 다시 입장하면 그 문서만 새 소유 필드로 바뀐다. `authUid`가 있는 체크인은 다른 사람이 덮어쓰지 못한다. `presence`와 `visitors`의 예전 기록은 남긴다. 같은 키에 다시 접속할 때만 그 항목이 새 형식으로 갱신되고, 다른 기록은 읽기에 그대로 남는다.
 
 ### 아직 약한 부분
 

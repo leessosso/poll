@@ -7,7 +7,9 @@ rules_version = '2';
 // 임시 대체: isAllowlistedAdmin()을 이메일/uid 비교로 바꾸고, src/lib/admin-auth.ts 도 같이 수정한다.
 // 투표자: 익명 로그인. admin 클레임이 없는 인증 사용자만 투표 전이를 할 수 있다.
 // 선택값과 유권자 id는 어떤 문서에도 함께 두지 않는다.
-// 선택지별 집계는 polls/{id}/tally/current 에만 있고, 마감+공개 전 또는 관리자만 읽는다.
+// 선택지별 집계의 공개 여부는 polls/{id}/tally/current 가 결정한다.
+// 예전 polls.results 필드는 지우지 않아도 투표 문서 읽기가 된다. 새 쓰기로 그 맵을 바꾸지는 못한다.
+// authUid 가 없는 예전 checkins 는 읽을 수 있고, 새 입장으로 덮어쓸 수 있다.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -85,16 +87,28 @@ service cloud.firestore {
         + (options.size() > 11 ? counts.get(options[11], 0) : 0);
     }
 
+    // results 는 예전 집계 필드다. 문서를 지우지 않고 남겨 두므로 읽기를 막지 않는다.
+    // 선택과 유권자를 한 문서에 넣는 choice 등은 계속 거부한다.
     function noChoiceKeys(data) {
-      return !data.keys().hasAny(['results', 'choice', 'ballot', 'selection', 'vote']);
+      return !data.keys().hasAny(['choice', 'ballot', 'selection', 'vote']);
     }
 
     function pollFieldSet(data) {
       return data.keys().hasOnly([
         'title', 'type', 'options', 'status', 'createdAt', 'showResults',
         'eligibilityMode', 'allowAbstain', 'eventId', 'durationSeconds',
-        'startedAt', 'endsAt', 'closedAt', 'quorumTarget', 'passRatio', 'castCount'
+        'startedAt', 'endsAt', 'closedAt', 'quorumTarget', 'passRatio', 'castCount',
+        'results'
       ]);
+    }
+
+    function legacyResultsOk(data) {
+      return !data.keys().hasAny(['results']) || (data.results is map && data.results.size() <= 12);
+    }
+
+    // 이미 있는 results 는 그대로 둔다. 새로 넣거나 숫자를 고치는 쓰기는 거부한다.
+    function resultsFrozen() {
+      return resource.data.get('results', null) == request.resource.data.get('results', null);
     }
 
     function optionalNumber(data, key) {
@@ -103,6 +117,7 @@ service cloud.firestore {
 
     function validPoll(data) {
       return pollFieldSet(data)
+        && legacyResultsOk(data)
         && noChoiceKeys(data)
         && data.title is string
         && data.title.size() > 0
@@ -253,10 +268,11 @@ service cloud.firestore {
       allow read: if signedIn() && noChoiceKeys(resource.data);
       allow create: if isAdmin()
         && validPoll(request.resource.data)
+        && !request.resource.data.keys().hasAny(['results'])
         && request.resource.data.status == 'waiting'
         && request.resource.data.castCount == 0
         && request.resource.data.showResults == false;
-      allow update: if isAdmin() && validPoll(request.resource.data) && validStatusMove()
+      allow update: if isAdmin() && validPoll(request.resource.data) && validStatusMove() && resultsFrozen()
         || isVoter() && voterBallotOk(pollId);
       allow delete: if isAdmin();
 
@@ -317,25 +333,58 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    function ownedCheckin(fields) {
+      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid'])
+        && fields.voterId is string
+        && fields.voterName is string
+        && fields.voterName.size() > 0
+        && fields.voterName.size() <= 40
+        && fields.claimedAt is number
+        && fields.claimToken is string
+        && fields.claimToken.size() >= 32
+        && fields.claimToken.size() <= 40
+        && fields.authUid is string
+        && fields.authUid.size() > 0
+        && fields.authUid.size() <= 128;
+    }
+
+    // 이 변경 전 체크인에는 authUid 가 없다. 목록 쿼리가 깨지지 않게 읽기는 허용하고,
+    // 그 문서는 새 입장으로 덮어쓸 수 있다. authUid 가 있는 문서는 덮어쓰지 못한다.
+    function legacyCheckin(fields) {
+      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken'])
+        && fields.keys().hasAll(['voterId', 'voterName', 'claimedAt'])
+        && fields.voterId is string
+        && fields.voterName is string
+        && fields.claimedAt is number
+        && (!fields.keys().hasAny(['claimToken']) || fields.claimToken is string);
+    }
+
+    function checkinMatchesVoter(id) {
+      return exists(/databases/$(database)/documents/voters/$(id))
+        && get(/databases/$(database)/documents/voters/$(id)).data.name == request.resource.data.voterName
+        && get(/databases/$(database)/documents/voters/$(id)).data.active == true;
+    }
+
     match /checkins/{voterId} {
-      allow read: if signedIn()
-        && resource.data.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid']);
+      // 목록 규칙은 문서 필드 조건이 쿼리와 맞지 않으면 통째로 거부된다.
+      // authUid 유무가 다른 예전 문서가 있어도 명단 조회가 되도록 읽기는 인증만 본다.
+      // 선택값은 이 컬렉션 쓰기에 넣을 수 없고, 투표는 authUid 가 본인일 때만 된다.
+      allow read: if signedIn();
       allow create: if isVoter()
         && !exists(/databases/$(database)/documents/checkins/$(voterId))
-        && request.resource.data.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid'])
+        && ownedCheckin(request.resource.data)
         && request.resource.data.voterId == voterId
         && request.resource.data.authUid == request.auth.uid
-        && request.resource.data.voterName is string
-        && request.resource.data.voterName.size() > 0
-        && request.resource.data.voterName.size() <= 40
         && nearNow(request.resource.data.claimedAt)
-        && request.resource.data.claimToken is string
-        && request.resource.data.claimToken.size() >= 32
-        && request.resource.data.claimToken.size() <= 40
-        && exists(/databases/$(database)/documents/voters/$(voterId))
-        && get(/databases/$(database)/documents/voters/$(voterId)).data.name == request.resource.data.voterName
-        && get(/databases/$(database)/documents/voters/$(voterId)).data.active == true;
-      allow update: if false;
+        && checkinMatchesVoter(voterId);
+      allow update: if resource != null
+        && isVoter()
+        && legacyCheckin(resource.data)
+        && ownedCheckin(request.resource.data)
+        && request.resource.data.voterId == voterId
+        && request.resource.data.authUid == request.auth.uid
+        && nearNow(request.resource.data.claimedAt)
+        && checkinMatchesVoter(voterId);
       allow delete: if isAdmin();
     }
 

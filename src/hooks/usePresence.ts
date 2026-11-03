@@ -51,10 +51,12 @@ export function usePresence(): void {
 
       void runRtdbTransaction(visitorRef, (current) => {
         const now = Date.now();
-        if (current) {
-          return { ...current, authUid: uid, lastSeenAt: now, visitCount: (current.visitCount ?? 0) + 1 };
+        if (current && typeof current.authUid === 'string' && current.authUid !== uid) {
+          return;
         }
-        return { authUid: uid, firstSeenAt: now, lastSeenAt: now, visitCount: 1 };
+        const firstSeenAt = current && typeof current.firstSeenAt === 'number' ? current.firstSeenAt : now;
+        const visitCount = current && typeof current.visitCount === 'number' ? current.visitCount + 1 : 1;
+        return { authUid: uid, firstSeenAt, lastSeenAt: now, visitCount };
       });
 
       unsubConnected = onValue(connectedRef, (snap) => {

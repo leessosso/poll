@@ -18,8 +18,10 @@ export function useRosterClaim(): UseRosterClaimResult {
     if (!claim) return;
 
     const unsub = onSnapshot(doc(db, 'checkins', claim.voterId), (snap) => {
-      const token = snap.exists() ? snap.data().claimToken : null;
-      if (token !== claim.claimToken) {
+      const data = snap.exists() ? snap.data() : null;
+      const token = data?.claimToken;
+      const owned = typeof data?.authUid === 'string' && data.authUid.length > 0;
+      if (!owned || token !== claim.claimToken) {
         clearRosterClaim();
         setClaim(null);
       }
