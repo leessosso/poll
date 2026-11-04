@@ -38,6 +38,12 @@ function emptyCounts(poll: Poll): Record<string, number> {
   return Object.fromEntries(getOptions(poll).map((option) => [option, 0]));
 }
 
+function assertUnderHeadcount(poll: Poll): void {
+  if (typeof poll.expectedCount === 'number' && poll.castCount >= poll.expectedCount) {
+    throw new Error('확정 인원만큼 투표가 끝났습니다.');
+  }
+}
+
 function permissionError(err: unknown, fallback: string): Error {
   const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
   if (code === 'permission-denied' || code === 'firestore/permission-denied') {
@@ -111,7 +117,10 @@ export async function createAttendanceSession(voter: Voter, eventId = DEFAULT_EV
   return sessionId;
 }
 
-export async function startPollWithParticipation(poll: Poll): Promise<void> {
+export async function startPollWithParticipation(poll: Poll, expectedCount: number): Promise<void> {
+  if (!Number.isInteger(expectedCount) || expectedCount < 1) {
+    throw new Error('확정 인원은 1명 이상이어야 합니다.');
+  }
   const now = Date.now();
   const durationSeconds = getDefaultDurationSeconds(poll);
   const endsAt = now + durationSeconds * 1000;
@@ -122,6 +131,7 @@ export async function startPollWithParticipation(poll: Poll): Promise<void> {
     startedAt: now,
     endsAt,
     durationSeconds,
+    expectedCount,
   });
   batch.set(tallyRef(poll.id), { counts: emptyCounts(poll) });
 
@@ -208,6 +218,7 @@ export async function castAttendanceVote(
   choice: string,
   session: VoterSession,
 ): Promise<void> {
+  assertUnderHeadcount(poll);
   const now = Date.now();
   const uid = requireUid();
   const sessionRef = doc(db, 'attendanceSessions', session.sessionId);
@@ -260,6 +271,13 @@ export async function castAttendanceVote(
   } catch (err) {
     throw permissionError(err, '투표를 저장하지 못했습니다. 이미 참여했거나 세션이 끝났을 수 있습니다.');
   }
+}
+
+export async function updateExpectedCount(pollId: string, expectedCount: number): Promise<void> {
+  if (!Number.isInteger(expectedCount) || expectedCount < 1) {
+    throw new Error('확정 인원은 1명 이상이어야 합니다.');
+  }
+  await updateDoc(doc(db, 'polls', pollId), { expectedCount });
 }
 
 export async function togglePollResults(poll: Poll): Promise<void> {
@@ -319,9 +337,11 @@ export async function removeVoterFromRoster(voterId: string, activePoll: Poll | 
   const tracksParticipation =
     activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
 
+  const directoryRef = doc(db, 'voterDirectory', voterId);
   if (!tracksParticipation) {
     const batch = writeBatch(db);
     batch.delete(voterRef);
+    batch.delete(directoryRef);
     batch.delete(checkinRef);
     await batch.commit();
     await deleteAttendanceSessions(voterId);
@@ -333,6 +353,7 @@ export async function removeVoterFromRoster(voterId: string, activePoll: Poll | 
     const participantSnap = await tx.get(participantRef);
     const completed = participantSnap.exists() && participantSnap.data().status === 'completed';
     tx.delete(voterRef);
+    tx.delete(directoryRef);
     if (!completed) {
       if (participantSnap.exists()) tx.delete(participantRef);
       tx.delete(checkinRef);
@@ -363,6 +384,7 @@ export async function releaseRosterClaim(voterId: string, activePoll: Poll | nul
 }
 
 export async function castRosterVote(poll: Poll, choice: string, claim: RosterClaim): Promise<void> {
+  assertUnderHeadcount(poll);
   const now = Date.now();
   const uid = requireUid();
   const pollRef = doc(db, 'polls', poll.id);
@@ -400,6 +422,7 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
 }
 
 export async function castOpenVote(poll: Poll, choice: string): Promise<void> {
+  assertUnderHeadcount(poll);
   const now = Date.now();
   const pollRef = doc(db, 'polls', poll.id);
   const uid = requireUid();
