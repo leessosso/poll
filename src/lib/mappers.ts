@@ -19,6 +19,7 @@ export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
     // 레거시 results 필드는 투표 문서에 남아 있어도 화면에 올리지 않는다.
     results: {},
     castCount: typeof data.castCount === 'number' ? data.castCount : 0,
+    expectedCount: typeof data.expectedCount === 'number' ? data.expectedCount : undefined,
     showResults: data.showResults ?? false,
     eligibilityMode: data.eligibilityMode ?? 'open',
     allowAbstain,

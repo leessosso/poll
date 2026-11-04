@@ -98,8 +98,15 @@ service cloud.firestore {
         'title', 'type', 'options', 'status', 'createdAt', 'showResults',
         'eligibilityMode', 'allowAbstain', 'eventId', 'durationSeconds',
         'startedAt', 'endsAt', 'closedAt', 'quorumTarget', 'passRatio', 'castCount',
-        'results'
+        'expectedCount', 'results'
       ]);
+    }
+
+    // 없는 예전 투표는 상한을 두지 않는다. 숫자가 있을 때만 1명 이상이다.
+    function expectedCountOk(data) {
+      return !data.keys().hasAny(['expectedCount'])
+        || data.expectedCount == null
+        || (data.expectedCount is int && data.expectedCount >= 1 && data.expectedCount <= 100000);
     }
 
     function legacyResultsOk(data) {
@@ -133,6 +140,7 @@ service cloud.firestore {
         && data.allowAbstain is bool
         && data.castCount is number
         && data.castCount >= 0
+        && expectedCountOk(data)
         && (!data.keys().hasAny(['eventId']) || data.eventId is string)
         && optionalNumber(data, 'durationSeconds')
         && optionalNumber(data, 'startedAt')
@@ -246,6 +254,7 @@ service cloud.firestore {
         && pollIsOpen(pollBefore)
         && pollAfter.diff(pollBefore).affectedKeys().hasOnly(['castCount'])
         && pollAfter.castCount == pollBefore.castCount + 1
+        && underHeadcount(pollBefore)
         && incrementOk(pollBefore, beforeDoc, afterDoc)
         && (
           (
@@ -256,6 +265,13 @@ service cloud.firestore {
           || (pollBefore.eligibilityMode == 'roster' && rosterPartOk(pollId, guard))
           || (pollBefore.eligibilityMode == 'attendance' && attendancePartOk(pollId, guard))
         );
+    }
+
+    // expectedCount 가 없으면 상한이 없다. 있으면 그 수 미만일 때만 한 표를 더한다.
+    function underHeadcount(poll) {
+      return !poll.keys().hasAny(['expectedCount'])
+        || poll.expectedCount == null
+        || poll.castCount < poll.expectedCount;
     }
 
     function canReadTally(pollId) {
@@ -318,7 +334,8 @@ service cloud.firestore {
     }
 
     match /voters/{voterId} {
-      allow read: if signedIn()
+      // 이름 외 식별자는 이 문서에만 있다. 투표자는 voterDirectory 를 읽는다.
+      allow read: if isAdmin()
         && resource.data.keys().hasOnly(['name', 'externalQrId', 'memberNo', 'active', 'createdAt']);
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['name', 'externalQrId', 'active', 'createdAt'])
@@ -330,6 +347,19 @@ service cloud.firestore {
         && request.resource.data.active == true
         && request.resource.data.createdAt is number;
       allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /voterDirectory/{voterId} {
+      allow read: if signedIn()
+        && resource.data.keys().hasOnly(['name', 'active', 'createdAt']);
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'active', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt is number;
       allow delete: if isAdmin();
     }
 

@@ -402,6 +402,57 @@ describe('firestore rules', () => {
     await assertSucceeds(getDoc(doc(voter(), 'attendanceSessions/session_' + UUID)));
   });
 
+  test('확정 인원 미만이면 투표되고 채우면 거부되며 인원은 관리자만 바꾼다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll-cap'), pollData({ eligibilityMode: 'open', expectedCount: 1, castCount: 0 }));
+      await setDoc(doc(db, 'polls/poll-cap/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll-full'), pollData({
+        eligibilityMode: 'open',
+        expectedCount: 1,
+        castCount: 1,
+      }));
+      await setDoc(doc(db, 'polls/poll-full/tally/current'), counts({ 찬성: 1 }));
+    });
+
+    await assertSucceeds(voteOpen(voter(), 'voter-1', 'poll-cap'));
+    await assertFails(voteOpen(voter('voter-2'), 'voter-2', 'poll-cap'));
+    await assertFails(voteOpen(voter('voter-3'), 'voter-3', 'poll-full'));
+    await assertSucceeds(updateDoc(doc(admin(), 'polls/poll-full'), { expectedCount: 2 }));
+    await assertSucceeds(voteOpen(voter('voter-3'), 'voter-3', 'poll-full'));
+    await assertFails(updateDoc(doc(voter(), 'polls/poll-cap'), { expectedCount: 9 }));
+  });
+
+  test('투표자는 식별자가 있는 명단 문서를 읽지 못하고 공개 이름만 읽는다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'voters/v1'), {
+        name: '김철수',
+        externalQrId: 'qr-1',
+        memberNo: '12',
+        active: true,
+        createdAt: 1,
+      });
+      await setDoc(doc(db, 'voterDirectory/v1'), {
+        name: '김철수',
+        active: true,
+        createdAt: 1,
+      });
+    });
+
+    await assertFails(getDoc(doc(voter(), 'voters/v1')));
+    await assertFails(getDocs(collection(voter(), 'voters')));
+    const hidden = await assertSucceeds(getDoc(doc(admin(), 'voters/v1')));
+    assert.equal(hidden.data().externalQrId, 'qr-1');
+    assert.equal(hidden.data().memberNo, '12');
+    const visible = await assertSucceeds(getDoc(doc(voter(), 'voterDirectory/v1')));
+    assert.deepEqual(Object.keys(visible.data()).sort(), ['active', 'createdAt', 'name']);
+    await assertSucceeds(getDocs(collection(voter(), 'voterDirectory')));
+    await assertFails(setDoc(doc(voter(), 'voterDirectory/v2'), {
+      name: '이영희',
+      active: true,
+      createdAt: 1,
+    }));
+  });
+
   test('results 필드가 없는 투표 목록은 인증된 사용자가 읽는다', async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll1'), pollData({ status: 'waiting' }));
@@ -534,6 +585,14 @@ function rosterVote(db, uid, choice) {
     tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
     tx.update(doc(db, 'polls/poll1/tally/current'), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, `polls/poll1/voteGuards/${uid}`), { voterId: 'v1' });
+  });
+}
+
+function voteOpen(db, uid, pollId) {
+  return runTransaction(db, async (tx) => {
+    tx.update(doc(db, `polls/${pollId}`), { castCount: increment(1) });
+    tx.update(doc(db, `polls/${pollId}/tally/current`), { 'counts.찬성': increment(1) });
+    tx.set(doc(db, `polls/${pollId}/voteGuards/${uid}`), { createdAt: Date.now() });
   });
 }
 

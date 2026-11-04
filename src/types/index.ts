@@ -24,6 +24,11 @@ export interface Poll {
   startedAt?: number;
   endsAt?: number;
   closedAt?: number;
+  /**
+   * 현장에서 확인한 인원. 이 수만큼만 투표가 집계된다.
+   * 없는 예전 투표는 상한이 없다.
+   */
+  expectedCount?: number;
   /** 정족수: 유효 투표로 인정하기 위한 최소 참여 인원 (미설정 시 정족수 검사 안 함) */
   quorumTarget?: number;
   /** 가결 기준: 찬성 / (찬성 + 반대) 비율. 0~1. 미설정 시 과반(0.5) 기준 */

@@ -21,43 +21,45 @@ import CreatePollForm from '../components/CreatePollForm';
 import PollParticipationPanel from '../components/PollParticipationPanel';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
+import { useRosterDirectory } from '../hooks/useRosterDirectory';
+import HeadcountPanel, { StartHeadcountDialog } from '../components/HeadcountPanel';
 
 const FAILURE_COPY: Record<ShellLoginFailure, { title: string; body: string }> = {
   malformed: {
     title: '로그인 코드를 확인하지 못했습니다',
-    body: '주소의 코드가 없거나 형식이 맞지 않습니다. 2청년회에서 다시 들어와 주세요.',
+    body: '주소의 코드가 없거나 형식이 맞지 않습니다. 2청년회 웹에서 다시 들어와 주세요.',
   },
   'bad-request': {
     title: '로그인 요청이 올바르지 않습니다',
-    body: '코드나 요청 형식이 맞지 않아 교환하지 못했습니다. 2청년회에서 다시 들어와 주세요.',
+    body: '코드나 요청 형식이 맞지 않아 교환하지 못했습니다. 2청년회 웹에서 다시 들어와 주세요.',
   },
   forbidden: {
     title: '투표 관리 권한이 없습니다',
-    body: '2청년회 역할이 관리자(ADMIN) 또는 교역자(PASTOR)인 계정만 들어올 수 있습니다.',
+    body: '2청년회 웹 역할이 관리자(ADMIN) 또는 교역자(PASTOR)인 계정만 들어올 수 있습니다.',
   },
   'not-linked': {
     title: '아직 회원과 연결되지 않은 계정입니다',
-    body: '이 계정에 연결된 회원이 없거나 한 명이 아닙니다. 2청년회에서 회원 연결을 마친 뒤 다시 들어와 주세요.',
+    body: '이 계정에 연결된 회원이 없거나 한 명이 아닙니다. 2청년회 웹에서 회원 연결을 마친 뒤 다시 들어와 주세요.',
   },
   'session-mismatch': {
     title: '로그인한 계정이 코드와 다릅니다',
-    body: '코드를 받은 계정과 지금 셸에 로그인된 계정이 다릅니다. 2청년회에서 다시 들어와 주세요.',
+    body: '코드를 받은 계정과 지금 2청년회 웹에 로그인된 계정이 다릅니다. 2청년회 웹에서 다시 들어와 주세요.',
   },
   origin: {
-    title: '이 주소에서는 셸 로그인을 열 수 없습니다',
-    body: '관리자 셸 로그인은 https://dcc.leessosso.uk/poll/ 또는 https://leessosso.github.io/poll 에서만 동작합니다.',
+    title: '이 주소에서는 2청년회 웹 로그인을 열 수 없습니다',
+    body: '2청년회 웹 로그인은 https://dcc.leessosso.uk/poll/ 또는 https://leessosso.github.io/poll 에서만 동작합니다.',
   },
   expired: {
     title: '로그인 코드가 만료되었습니다',
     body: '코드는 60초 동안 한 번만 쓸 수 있습니다. 이미 사용했거나 시간이 지났습니다. 다시 시도해 주세요.',
   },
   'shell-down': {
-    title: '2청년회 셸에 연결하지 못했습니다',
-    body: '셸이 응답하지 않거나 서버 설정에 문제가 있습니다. 복구되기 전에는 아래 비상 로그인을 사용해 주세요.',
+    title: '2청년회 웹에 연결하지 못했습니다',
+    body: '2청년회 웹이 응답하지 않거나 서버 설정에 문제가 있습니다. 복구되기 전에는 아래 비상 로그인을 사용해 주세요.',
   },
   unauthenticated: {
-    title: '셸에서 사용자를 확인하지 못했습니다',
-    body: '코드를 발급한 계정을 셸에서 찾지 못했습니다. 2청년회에서 다시 로그인해 주세요.',
+    title: '2청년회 웹에서 사용자를 확인하지 못했습니다',
+    body: '코드를 발급한 계정을 2청년회 웹에서 찾지 못했습니다. 2청년회 웹에서 다시 로그인해 주세요.',
   },
 };
 
@@ -103,7 +105,7 @@ export default function AdminPage() {
   if (exchanging || !ready) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-gray-400">{exchanging ? '2청년회 로그인 확인 중...' : '불러오는 중...'}</p>
+        <p className="text-gray-400">{exchanging ? '2청년회 웹 로그인 확인 중...' : '불러오는 중...'}</p>
       </div>
     );
   }
@@ -134,7 +136,7 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
           {copy ? copy.title : '관리자 로그인'}
         </h1>
         <p className="text-gray-500 text-sm text-center mb-6 leading-relaxed">
-          {copy ? copy.body : '등촌교회 2청년회 투표 관리. 2청년회 계정으로 들어옵니다.'}
+          {copy ? copy.body : '등촌교회 2청년회 투표 관리. 2청년회 웹 계정으로 들어옵니다.'}
         </p>
         {offerRetry && (
           <button
@@ -142,7 +144,7 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
             onClick={() => redirectToShell(() => setLocalFailure('origin'))}
             className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-hover"
           >
-            {failure ? '2청년회로 다시 로그인' : '2청년회로 로그인'}
+            {failure ? '2청년회 웹으로 다시 로그인' : '2청년회 웹으로 로그인'}
           </button>
         )}
         {shown === 'shell-down' && (
@@ -151,7 +153,7 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
             onClick={() => redirectToShell(() => setLocalFailure('origin'))}
             className="w-full mt-3 border border-border text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50"
           >
-            셸이 복구되면 다시 시도
+            2청년회 웹이 복구되면 다시 시도
           </button>
         )}
         <div className={offerRetry || failure === 'shell-down' ? 'mt-6' : ''}>
@@ -203,7 +205,7 @@ function EmergencyLogin() {
   return (
     <form onSubmit={handleLogin} className="space-y-4 mt-4">
       <p className="text-gray-400 text-xs leading-relaxed">
-        셸이 멈춰 있을 때만 사용합니다. 미리 만들어 둔 Firebase 계정과 관리자 클레임이 있어야 합니다.
+        2청년회 웹이 멈춰 있을 때만 사용합니다. 미리 만들어 둔 Firebase 계정과 관리자 클레임이 있어야 합니다.
       </p>
       <input
         type="email"
@@ -238,7 +240,11 @@ function EmergencyLogin() {
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const { polls } = usePolls('admin');
   const { presenceCount, visitorCount } = usePresenceStats();
+  const { checkins } = useRosterDirectory('admin');
   const [showCreate, setShowCreate] = useState(false);
+  const [openingPoll, setOpeningPoll] = useState<Poll | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState('');
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -246,12 +252,27 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const waitingPolls = polls.filter((p) => p.status === 'waiting');
   const closedPolls = polls.filter((p) => p.status === 'closed');
 
-  const activatePoll = async (poll: Poll) => {
+  const activatePoll = (poll: Poll) => {
     if (activePoll && activePoll.id !== poll.id) {
       alert('먼저 현재 진행 중인 투표를 마감해주세요.');
       return;
     }
-    await startPollWithParticipation(poll);
+    setOpenError('');
+    setOpeningPoll(poll);
+  };
+
+  const confirmOpen = async (expectedCount: number) => {
+    if (!openingPoll) return;
+    setOpening(true);
+    setOpenError('');
+    try {
+      await startPollWithParticipation(openingPoll, expectedCount);
+      setOpeningPoll(null);
+    } catch (err) {
+      setOpenError(err instanceof Error ? err.message : '투표를 시작하지 못했습니다.');
+    } finally {
+      setOpening(false);
+    }
   };
 
   const closePoll = (poll: Poll) =>
@@ -307,6 +328,14 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
               진행 중
             </h2>
+            <div className="mb-3">
+              <HeadcountPanel
+                key={activePoll.id}
+                poll={activePoll}
+                presenceCount={presenceCount}
+                checkinCount={checkins.length}
+              />
+            </div>
             <PollAdminCard
               poll={activePoll}
               expanded={expandedId === activePoll.id}
@@ -373,6 +402,15 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         )}
       </main>
 
+      {openingPoll && (
+        <StartHeadcountDialog
+          defaultCount={checkins.length || presenceCount}
+          submitting={opening}
+          error={openError}
+          onCancel={() => setOpeningPoll(null)}
+          onConfirm={(count) => void confirmOpen(count)}
+        />
+      )}
       {showCreate && <CreatePollForm onClose={() => setShowCreate(false)} />}
       {editingPoll && (
         <CreatePollForm editPoll={editingPoll} onClose={() => setEditingPoll(null)} />

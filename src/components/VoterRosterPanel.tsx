@@ -19,7 +19,7 @@ interface VoterRosterPanelProps {
 }
 
 export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPanelProps) {
-  const { voters, claimedIds } = useRosterDirectory();
+  const { voters, claimedIds } = useRosterDirectory('admin');
   const { roomCode, loading: codeLoading } = useMeetingCode();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [namesText, setNamesText] = useState('');
@@ -65,9 +65,15 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
       for (let offset = 0; offset < fresh.length; offset += 400) {
         const batch = writeBatch(db);
         fresh.slice(offset, offset + 400).forEach((voterName) => {
-          batch.set(doc(collection(db, 'voters')), {
+          const voterRef = doc(collection(db, 'voters'));
+          batch.set(voterRef, {
             name: voterName,
             externalQrId: '',
+            active: true,
+            createdAt: now,
+          });
+          batch.set(doc(db, 'voterDirectory', voterRef.id), {
+            name: voterName,
             active: true,
             createdAt: now,
           });
