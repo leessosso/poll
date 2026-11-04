@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { usePolls } from '../hooks/usePolls';
 import { usePresence } from '../hooks/usePresence';
+import { useVoterAuth } from '../hooks/useVoterAuth';
 import { useRosterClaim } from '../hooks/useRosterClaim';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
 import { useVote } from '../hooks/useVote';
@@ -12,8 +13,33 @@ import RosterClaimGate from '../components/RosterClaimGate';
 import VoterAuthGate from '../components/VoterAuthGate';
 
 export default function VoterPage() {
+  const { ready, error } = useVoterAuth();
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="bg-surface rounded-2xl shadow-sm border border-border p-8 w-full max-w-sm text-center">
+          <p className="text-gray-800 font-semibold mb-2">투표 화면을 열 수 없습니다</p>
+          <p className="text-sm text-gray-500">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ready) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-gray-400 text-lg">불러오는 중...</div>
+      </div>
+    );
+  }
+
+  return <VoterScreen />;
+}
+
+function VoterScreen() {
   const { sessionId } = useParams();
-  const { polls, loading } = usePolls();
+  const { polls, loading } = usePolls('voter');
   usePresence();
   const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
   const { claim, ready: claimReady, saveClaim } = useRosterClaim();

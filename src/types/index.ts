@@ -12,7 +12,10 @@ export interface Poll {
   options: string[];
   status: PollStatus;
   createdAt: number;
+  /** 클라이언트에서 tally/current 를 읽어 채운다. 투표 문서에는 저장하지 않는다. */
   results: Record<string, number>;
+  /** 선택지를 드러내지 않는 참여 총원. 정족수 진행률에 쓴다. */
+  castCount: number;
   showResults: boolean;
   eligibilityMode: EligibilityMode;
   allowAbstain: boolean;

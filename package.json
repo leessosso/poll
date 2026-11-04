@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:rules": "firebase emulators:exec --only firestore,database --project demo-dcc-poll \"node --test --test-timeout 30000 tests/rules.test.mjs\"",
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
@@ -28,6 +29,8 @@
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase-tools": "^14.0.0",
     "gh-pages": "^6.3.0",
     "globals": "^17.4.0",
     "tailwindcss": "^4.2.2",

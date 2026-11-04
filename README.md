@@ -84,7 +84,9 @@ React + Firebase + GitHub Pages 기반 실시간 투표 시스템입니다.
 
 | 컬렉션 | 역할 |
 |--------|------|
-| `polls` | 투표 정의, 상태, 결과 합계 |
+| `polls` | 투표 정의, 상태, 공개 여부, 선택지가 없는 참여 총원 `castCount` |
+| `polls/{pollId}/tally/current` | 선택지별 집계. 마감 후 공개이거나 관리자만 읽음 |
+| `polls/{pollId}/voteGuards/{uid}` | 한 계정의 1표 잠금. 선택값은 없고 클라이언트는 읽지 않음 |
 | `polls/{pollId}/participation` | 현장 명단·QR 출석 투표의 참여 여부. 이름과 완료 여부만 있고 선택값은 없음 |
 | `voters` | 고를 수 있는 성도 이름. 명단에 있어도 입장하기 전에는 투표 인원이 아님 |
 | `checkins/{voterId}` | 입장 코드로 이름을 고른 기록. 선택값은 없음 |
@@ -130,8 +132,98 @@ VITE_FIREBASE_STORAGE_BUCKET=...
 VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 VITE_FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
-VITE_ADMIN_PASSWORD=원하는비밀번호
 ```
+
+관리자 비밀번호 변수는 없다. 비밀번호를 번들에 넣지 않는다.
+
+## 보안 규칙과 관리자 로그인
+
+Firestore 규칙과 Realtime Database 규칙은 저장소의 `firestore.rules`, `database.rules.json`에 있다. `firebase.json`이 둘을 가리킨다. `npm run deploy`는 GitHub Pages만 갱신하고 규칙은 배포하지 않는다.
+
+`/admin`의 기본 버튼은 2청년회 셸로 보낸다. 셸이 ADMIN 또는 PASTOR이고 회원(mid)이 하나 연결되어 있으면, 60초 일회용 코드를 주소 프래그먼트로 돌려준다. 투표 앱은 그 코드만으로 `https://youth2-space.vercel.app/api/poll/firebase-token`에 교환하고 `signInWithCustomToken`을 호출한다. 쿠키는 보내지 않는다. uid는 `shell_<mid>`이고 클레임은 `{ "admin": true, "mid" }`이다. 규칙은 `admin == true`만 본다. 규격은 [`docs/security-shell-admin.md`](docs/security-shell-admin.md)에 있다.
+
+이메일/비밀번호는 셸이 죽었을 때의 비상 로그인이다. 화면에서는 "비상 로그인"으로만 연다. 같은 관리자 클레임이 있어야 한다.
+
+규칙 테스트:
+
+```bash
+npm run test:rules
+```
+
+Java가 필요하다. Firestore/RTDB 에뮬레이터만 띄우며, `dcc-poll` 실데이터에는 연결하지 않는다.
+
+### 콘솔에서 직접 할 일
+
+이 저장소를 받은 에이전트나 CI가 하면 안 된다. 프로젝트 소유자가 배포를 승인할 때 아래 순서로 한다.
+
+1. 셸(youth2-space) 서버 환경에 `dcc-poll` 서비스 계정을 넣는다. 이 저장소에는 넣지 않는다. 없으면 코드 교환이 `500`이다.
+   - `POLL_FIREBASE_PROJECT_ID` (비우면 `dcc-poll`)
+   - `POLL_FIREBASE_CLIENT_EMAIL`
+   - `POLL_FIREBASE_PRIVATE_KEY`
+   셸을 배포한 뒤, 투표 관리자는 셸 역할 ADMIN 또는 PASTOR이고 `members.userId`로 회원이 정확히 하나 연결돼 있어야 한다.
+2. Authentication에서 Email/Password(비상 로그인)와 Anonymous(투표자)를 켠다.
+3. 비상 로그인용 이메일/비밀번호 계정을 한 명 만든다. 셸이 정상일 때는 이 계정을 쓰지 않는다.
+4. 그 사용자에게 커스텀 클레임 `{ "admin": true }`를 넣는다. 서비스 계정은 로컬에서만 쓰고 저장소에 커밋하지 않는다. 셸 계정 `shell_<mid>`는 첫 커스텀 토큰 로그인 때 생기므로 미리 만들지 않는다.
+
+```bash
+# FIREBASE_SERVICE_ACCOUNT_JSON, ADMIN_EMAIL 을 환경에만 두고 실행
+node --input-type=module -e '
+import { initializeApp, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)) });
+const user = await getAuth().getUserByEmail(process.env.ADMIN_EMAIL);
+await getAuth().setCustomUserClaims(user.uid, { admin: true });
+console.log(user.uid);
+'
+```
+
+`firebase-admin`은 이 앱 의존성이 아니다. 위 명령을 돌리는 폴더에만 설치한다. 클레임을 넣은 뒤에는 그 계정으로 다시 로그인해야 토큰에 반영된다.
+
+클레임을 쓰기 어려우면 `firestore.rules`의 `isAllowlistedAdmin()`과 `src/lib/admin-auth.ts`의 `ALLOWLISTED_ADMIN_EMAILS`를 같은 이메일로 같이 바꾼다. 둘 중 하나만 바꾸면 화면과 규칙이 어긋난다.
+
+5. Authentication 승인 도메인에 `leessosso.github.io`와 `dcc.leessosso.uk`를 넣는다.
+6. 데이터 이전은 추가만 한다. 삭제는 하지 않는다. `scripts/migrate-tally.mjs`가 `results`를 `tally/current`로 복사하고, `castCount`가 없을 때만 숫자를 채운다. 기본은 dry-run이다.
+
+```bash
+# firebase-admin 은 이 저장소 의존성이 아니다. 명령을 실행하는 폴더에만 설치한다.
+# FIREBASE_SERVICE_ACCOUNT_JSON 은 환경에만 둔다.
+node scripts/migrate-tally.mjs
+node scripts/migrate-tally.mjs --apply
+```
+
+`checkins`, RTDB `presence`, `visitors`, `polls.results`는 지우지 않는다. `authUid`가 없는 체크인은 새 입장으로 다시 고를 수 있고, 목록을 막지 않는다. `authUid`가 없는 presence/visitors는 남겨 두며, 읽기와 다른 키의 새 쓰기는 된다. `results`가 문서에 남아 있으면 로그인한 사용자는 투표 문서를 읽을 때 그 맵을 볼 수 있다. 새 투표는 이 필드를 만들지 않고, 공개 집계는 `tally/current`만 쓴다. 그래서 규칙을 올리기 전에 진행 중인 투표가 없어야 한다.
+
+7. 규칙을 배포한다. 사이트 배포와 별개다.
+
+```bash
+npx firebase deploy --only firestore:rules,database --project dcc-poll
+```
+
+8. `.env`에 위의 Firebase 웹 설정만 넣고 `npm run deploy`로 사이트를 배포한다. `VITE_ADMIN_PASSWORD`는 넣지 않는다. 셸 환경 변수를 사이트 `.env`에 넣지 않는다. 사이트보다 셸이 먼저 떠 있어야 관리자 버튼이 동작한다.
+
+### 데이터 이전
+
+실데이터에는 손대지 않은 상태의 절차다. 실행은 소유자만 한다. 스크립트는 삭제하지 않는다.
+
+각 `polls/{id}`에 대해 `scripts/migrate-tally.mjs`가 하는 일은 다음뿐이다.
+
+- `tally/current`가 없으면 `{ counts }`를 만든다. `results`가 숫자 맵이면 그 값을 쓰고, 없으면 선택지별 `0`이다. 이미 있으면 덮어쓰지 않는다.
+- `castCount`가 없으면 `results` 합계(없으면 0)로 설정한다. 이미 있으면 유지한다.
+- `results` 필드는 그대로 둔다.
+
+`checkins`에 `authUid`가 없는 문서는 자리 점유로 보지 않는다. 같은 이름으로 다시 입장하면 그 문서만 새 소유 필드로 바뀐다. `authUid`가 있는 체크인은 다른 사람이 덮어쓰지 못한다. `presence`와 `visitors`의 예전 기록은 남긴다. 같은 키에 다시 접속할 때만 그 항목이 새 형식으로 갱신되고, 다른 기록은 읽기에 그대로 남는다.
+
+### 아직 약한 부분
+
+- 투표자 계정은 익명이다. 브라우저를 새로 만들면 익명 uid도 새로 생긴다. `open` 투표는 그 uid마다 한 표라서, 계정을 반복 발급하면 표를 더 넣을 수 있다.
+- 현장 명단은 먼저 이름을 잡은 uid만 그 이름으로 투표한다. 입장 코드는 `meeting/current`를 읽어야 검사가 가능해서 인증된 사용자에게 공개다. 코드를 모르는 사람도 비어 있는 이름을 잡을 수 있다.
+- `checkins`의 `claimToken`과 `authUid`는 같은 문서를 목록으로 읽는다. 토큰만으로는 투표할 수 없고, 그 체크인을 만든 uid여야 한다.
+- 출석 세션 id를 아는 사람은 그 세션으로 한 표 넣을 수 있다. 목록 조회는 관리자만 된다.
+- 익명 사용자는 `presence`와 오늘 `visitors`를 읽는다. 접속 시각과 클라이언트 id이며 선택값은 없다.
+- 관리자 계정은 규칙을 통과하는 쓰기를 모두 할 수 있다. 집계를 직접 고치는 것도 여기 포함된다.
+- 셸이 `mid`로 유권자를 묶기 전에는 위 익명 한계가 남는다. 교체 규격은 [`docs/security-shell-admin.md`](docs/security-shell-admin.md)에 있다.
+
+선택지별 숫자는 `polls/{id}/tally/current`에만 있다. 투표가 `closed`이고 `showResults`가 켜져 있거나, 관리자일 때만 읽는다. 진행 중에는 `showResults`를 켜도 투표자 화면은 집계를 요청하지 않는다. 정족수 막대는 선택지가 없는 `castCount`만 본다.
 
 ## 푸시와 배포
 
@@ -153,7 +245,7 @@ npm run deploy
 ## 현재 구현 상태와 주의사항
 
 - 장로 선출 투표 흐름은 현재 클라이언트 + Firestore 기반으로 동작 확인이 가능하게 구현되어 있습니다.
-- 실제 운영 전에는 `castVote`, `startPoll`, `finalizePoll`, `checkInFromQr` 성격의 로직을 Cloud Functions로 옮기고 Firestore 보안 규칙을 강화해야 합니다.
-- 관리자 비밀번호는 현재 `VITE_ADMIN_PASSWORD` 기반이라 프론트 번들에 포함됩니다. 실제 선거 운영 전에는 Firebase Auth + 관리자 권한으로 이전하는 것이 좋습니다.
+- 보안 규칙과 관리자 로그인은 위 "보안 규칙과 관리자 로그인"을 따른다. 투표 쓰기는 아직 클라이언트에 있다. Cloud Functions로 옮기는 일은 셸 로그인 이후다.
+- 관리자 비밀번호는 번들에 넣지 않는다. `/admin`은 2청년회 셸 SSO가 기본이고, 이메일/비밀번호는 비상 로그인이다. 둘 다 `admin` 커스텀 클레임이 있어야 한다.
 - QR 출석 스캐너의 실제 연동 방식은 아직 확정 전입니다. 한자리에 모이는 투표는 `현장 명단`을 쓰고, QR 세션은 관리자 화면에서 테스트로 만들 수 있습니다.
 - 헤더의 진입·현재 인원은 브라우저·탭 수입니다. 입장 코드로 이름을 고른 인원은 명단의 `입장함`과 투표 시작 후 참여 현황에서 확인합니다.

@@ -44,10 +44,14 @@ export function useRosterDirectory(): UseRosterDirectoryResult {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'checkins'), (snap) => {
       setCheckins(
-        snap.docs.map((checkinDoc) => ({
-          voterId: checkinDoc.id,
-          voterName: checkinDoc.data().voterName ?? '이름 없음',
-        })),
+        snap.docs.flatMap((checkinDoc) => {
+          const data = checkinDoc.data();
+          if (typeof data.authUid !== 'string' || data.authUid.length === 0) return [];
+          return [{
+            voterId: checkinDoc.id,
+            voterName: data.voterName ?? '이름 없음',
+          }];
+        }),
       );
       setCheckinsReady(true);
     });

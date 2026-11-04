@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { EligibilityMode, Poll, PollType } from '../types';
 
@@ -79,7 +79,9 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
           passRatio: quorumFields.passRatio ?? null,
         });
       } else {
-        await addDoc(collection(db, 'polls'), {
+        const pollRef = doc(collection(db, 'polls'));
+        const batch = writeBatch(db);
+        batch.set(pollRef, {
           title: title.trim(),
           type,
           options: finalOptions,
@@ -89,10 +91,14 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
           durationSeconds,
           status: 'waiting',
           createdAt: Date.now(),
-          results: Object.fromEntries(finalOptions.map((option) => [option, 0])),
           showResults: false,
+          castCount: 0,
           ...quorumFields,
         });
+        batch.set(doc(db, 'polls', pollRef.id, 'tally', 'current'), {
+          counts: Object.fromEntries(finalOptions.map((option) => [option, 0])),
+        });
+        await batch.commit();
       }
       onClose();
     } catch (err: unknown) {

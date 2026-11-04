@@ -1,0 +1,457 @@
+rules_version = '2';
+
+// dcc-poll 최소 보안 규칙.
+// 관리자: request.auth.token.admin == true (커스텀 클레임).
+// 셸 커스텀 토큰 uid는 shell_<mid> 이고 클레임은 { admin: true, mid } 다.
+// uid 형식은 검사하지 않는다. admin 클레임만 본다.
+// 임시 대체: isAllowlistedAdmin()을 이메일/uid 비교로 바꾸고, src/lib/admin-auth.ts 도 같이 수정한다.
+// 투표자: 익명 로그인. admin 클레임이 없는 인증 사용자만 투표 전이를 할 수 있다.
+// 선택값과 유권자 id는 어떤 문서에도 함께 두지 않는다.
+// 선택지별 집계의 공개 여부는 polls/{id}/tally/current 가 결정한다.
+// 예전 polls.results 필드는 지우지 않아도 투표 문서 읽기가 된다. 새 쓰기로 그 맵을 바꾸지는 못한다.
+// authUid 가 없는 예전 checkins 는 읽을 수 있고, 새 입장으로 덮어쓸 수 있다.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAllowlistedAdmin() {
+      // 클레임 설정이 어려우면 이 함수를 아래로 교체한다.
+      // 없는 클레임을 바로 읽으면 규칙 평가가 실패하므로 keys()로 먼저 확인한다.
+      // return signedIn() && (
+      //   request.auth.uid == '관리자uid' ||
+      //   (request.auth.token.keys().hasAny(['email']) && request.auth.token.email == 'admin@example.com')
+      // );
+      return false;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          (request.auth.token.keys().hasAny(['admin']) && request.auth.token.admin == true)
+          || isAllowlistedAdmin()
+        );
+    }
+
+    function isVoter() {
+      return signedIn() && !isAdmin();
+    }
+
+    function pollPath(pollId) {
+      return /databases/$(database)/documents/polls/$(pollId);
+    }
+
+    function tallyPath(pollId) {
+      return /databases/$(database)/documents/polls/$(pollId)/tally/current;
+    }
+
+    function guardPath(pollId) {
+      return /databases/$(database)/documents/polls/$(pollId)/voteGuards/$(request.auth.uid);
+    }
+
+    function partPath(pollId, voterId) {
+      return /databases/$(database)/documents/polls/$(pollId)/participation/$(voterId);
+    }
+
+    function changedKeyAllowed(options, changed) {
+      return changed.size() == 1 && (
+        (options.size() > 0 && changed.hasAny([options[0]]))
+        || (options.size() > 1 && changed.hasAny([options[1]]))
+        || (options.size() > 2 && changed.hasAny([options[2]]))
+        || (options.size() > 3 && changed.hasAny([options[3]]))
+        || (options.size() > 4 && changed.hasAny([options[4]]))
+        || (options.size() > 5 && changed.hasAny([options[5]]))
+        || (options.size() > 6 && changed.hasAny([options[6]]))
+        || (options.size() > 7 && changed.hasAny([options[7]]))
+        || (options.size() > 8 && changed.hasAny([options[8]]))
+        || (options.size() > 9 && changed.hasAny([options[9]]))
+        || (options.size() > 10 && changed.hasAny([options[10]]))
+        || (options.size() > 11 && changed.hasAny([options[11]]))
+      );
+    }
+
+    function tallySum(options, counts) {
+      return (options.size() > 0 ? counts.get(options[0], 0) : 0)
+        + (options.size() > 1 ? counts.get(options[1], 0) : 0)
+        + (options.size() > 2 ? counts.get(options[2], 0) : 0)
+        + (options.size() > 3 ? counts.get(options[3], 0) : 0)
+        + (options.size() > 4 ? counts.get(options[4], 0) : 0)
+        + (options.size() > 5 ? counts.get(options[5], 0) : 0)
+        + (options.size() > 6 ? counts.get(options[6], 0) : 0)
+        + (options.size() > 7 ? counts.get(options[7], 0) : 0)
+        + (options.size() > 8 ? counts.get(options[8], 0) : 0)
+        + (options.size() > 9 ? counts.get(options[9], 0) : 0)
+        + (options.size() > 10 ? counts.get(options[10], 0) : 0)
+        + (options.size() > 11 ? counts.get(options[11], 0) : 0);
+    }
+
+    // results 는 예전 집계 필드다. 문서를 지우지 않고 남겨 두므로 읽기를 막지 않는다.
+    // 선택과 유권자를 한 문서에 넣는 choice 등은 계속 거부한다.
+    function noChoiceKeys(data) {
+      return !data.keys().hasAny(['choice', 'ballot', 'selection', 'vote']);
+    }
+
+    function pollFieldSet(data) {
+      return data.keys().hasOnly([
+        'title', 'type', 'options', 'status', 'createdAt', 'showResults',
+        'eligibilityMode', 'allowAbstain', 'eventId', 'durationSeconds',
+        'startedAt', 'endsAt', 'closedAt', 'quorumTarget', 'passRatio', 'castCount',
+        'results'
+      ]);
+    }
+
+    function legacyResultsOk(data) {
+      return !data.keys().hasAny(['results']) || (data.results is map && data.results.size() <= 12);
+    }
+
+    // 이미 있는 results 는 그대로 둔다. 새로 넣거나 숫자를 고치는 쓰기는 거부한다.
+    function resultsFrozen() {
+      return resource.data.get('results', null) == request.resource.data.get('results', null);
+    }
+
+    function optionalNumber(data, key) {
+      return !data.keys().hasAny([key]) || data[key] == null || data[key] is number;
+    }
+
+    function validPoll(data) {
+      return pollFieldSet(data)
+        && legacyResultsOk(data)
+        && noChoiceKeys(data)
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 200
+        && data.type in ['yesno', 'choice']
+        && data.options is list
+        && data.options.size() >= 1
+        && data.options.size() <= 12
+        && data.status in ['waiting', 'active', 'closed']
+        && data.createdAt is number
+        && data.showResults is bool
+        && data.eligibilityMode in ['open', 'roster', 'attendance']
+        && data.allowAbstain is bool
+        && data.castCount is number
+        && data.castCount >= 0
+        && (!data.keys().hasAny(['eventId']) || data.eventId is string)
+        && optionalNumber(data, 'durationSeconds')
+        && optionalNumber(data, 'startedAt')
+        && optionalNumber(data, 'endsAt')
+        && optionalNumber(data, 'closedAt')
+        && optionalNumber(data, 'quorumTarget')
+        && optionalNumber(data, 'passRatio');
+    }
+
+    function validStatusMove() {
+      let before = resource.data.status;
+      let after = request.resource.data.status;
+      return before == after
+        || (before == 'waiting' && after == 'active')
+        || (before == 'active' && after == 'closed');
+    }
+
+    function pollIsOpen(poll) {
+      return poll.status == 'active'
+        && (
+          !poll.keys().hasAny(['endsAt'])
+          || poll.endsAt == null
+          || request.time.toMillis() < poll.endsAt
+        );
+    }
+
+    function nearNow(value) {
+      return value is number
+        && value > request.time.toMillis() - 300000
+        && value < request.time.toMillis() + 300000;
+    }
+
+    function incrementOk(poll, beforeDoc, afterDoc) {
+      let before = beforeDoc.counts;
+      let after = afterDoc.counts;
+      let changed = after.diff(before).affectedKeys();
+      return beforeDoc.keys().hasOnly(['counts'])
+        && afterDoc.keys().hasOnly(['counts'])
+        && before is map
+        && after is map
+        && before.keys().hasAll(after.keys())
+        && after.keys().hasAll(before.keys())
+        && changed.size() == 1
+        && changedKeyAllowed(poll.options, changed)
+        && tallySum(poll.options, after) == tallySum(poll.options, before) + 1;
+    }
+
+    function participantShape(data) {
+      return data.keys().hasOnly(['voterId', 'voterName', 'status', 'createdAt', 'completedAt'])
+        && data.voterId is string
+        && data.voterName is string
+        && data.voterName.size() > 0
+        && data.voterName.size() <= 40
+        && data.status in ['pending', 'completed']
+        && optionalNumber(data, 'createdAt')
+        && optionalNumber(data, 'completedAt');
+    }
+
+    function rosterPartOk(pollId, guard) {
+      let voterId = guard.voterId;
+      let checkin = get(/databases/$(database)/documents/checkins/$(voterId)).data;
+      let beforePart = get(partPath(pollId, voterId)).data;
+      let afterPart = getAfter(partPath(pollId, voterId)).data;
+      return guard.keys().hasOnly(['voterId'])
+        && guard.voterId is string
+        && checkin.authUid == request.auth.uid
+        && beforePart.status == 'pending'
+        && afterPart.status == 'completed'
+        && afterPart.voterId == voterId
+        && afterPart.diff(beforePart).affectedKeys().hasOnly(['status', 'completedAt'])
+        && nearNow(afterPart.completedAt)
+        && participantShape(afterPart);
+    }
+
+    function attendancePartOk(pollId, guard) {
+      let voterId = guard.voterId;
+      let session = get(/databases/$(database)/documents/attendanceSessions/$(guard.sessionId)).data;
+      let hadPart = exists(partPath(pollId, voterId));
+      let beforePart = hadPart ? get(partPath(pollId, voterId)).data : {};
+      let afterPart = getAfter(partPath(pollId, voterId)).data;
+      return guard.keys().hasOnly(['voterId', 'sessionId'])
+        && guard.voterId is string
+        && guard.sessionId is string
+        && session.voterId == voterId
+        && session.status == 'active'
+        && session.expiresAt is number
+        && request.time.toMillis() < session.expiresAt
+        && afterPart.status == 'completed'
+        && afterPart.voterId == voterId
+        && nearNow(afterPart.completedAt)
+        && participantShape(afterPart)
+        && (
+          (!hadPart && afterPart.keys().hasOnly(['voterId', 'voterName', 'status', 'completedAt']))
+          || (
+            hadPart
+            && beforePart.status == 'pending'
+            && afterPart.diff(beforePart).affectedKeys().hasOnly(['status', 'completedAt'])
+          )
+        );
+    }
+
+    // 문서 접근은 평가당 10회가 한도라, poll/tally/guard 는 여기서 한 번씩만 읽는다.
+    function voterBallotOk(pollId) {
+      let pollBefore = get(pollPath(pollId)).data;
+      let pollAfter = getAfter(pollPath(pollId)).data;
+      let beforeDoc = get(tallyPath(pollId)).data;
+      let afterDoc = getAfter(tallyPath(pollId)).data;
+      let guard = getAfter(guardPath(pollId)).data;
+      return isVoter()
+        && !exists(guardPath(pollId))
+        && pollIsOpen(pollBefore)
+        && pollAfter.diff(pollBefore).affectedKeys().hasOnly(['castCount'])
+        && pollAfter.castCount == pollBefore.castCount + 1
+        && incrementOk(pollBefore, beforeDoc, afterDoc)
+        && (
+          (
+            pollBefore.eligibilityMode == 'open'
+            && guard.keys().hasOnly(['createdAt'])
+            && nearNow(guard.createdAt)
+          )
+          || (pollBefore.eligibilityMode == 'roster' && rosterPartOk(pollId, guard))
+          || (pollBefore.eligibilityMode == 'attendance' && attendancePartOk(pollId, guard))
+        );
+    }
+
+    function canReadTally(pollId) {
+      let poll = get(pollPath(pollId)).data;
+      return isAdmin()
+        || (poll.status == 'closed' && poll.showResults == true);
+    }
+
+    match /polls/{pollId} {
+      allow read: if signedIn() && noChoiceKeys(resource.data);
+      allow create: if isAdmin()
+        && validPoll(request.resource.data)
+        && !request.resource.data.keys().hasAny(['results'])
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.castCount == 0
+        && request.resource.data.showResults == false;
+      allow update: if isAdmin() && validPoll(request.resource.data) && validStatusMove() && resultsFrozen()
+        || isVoter() && voterBallotOk(pollId);
+      allow delete: if isAdmin();
+
+      match /tally/{docId} {
+        allow read: if docId == 'current'
+          && resource.data.keys().hasOnly(['counts'])
+          && canReadTally(pollId);
+        allow create: if docId == 'current'
+          && isAdmin()
+          && request.resource.data.keys().hasOnly(['counts'])
+          && request.resource.data.counts is map;
+        allow update: if docId == 'current' && (
+          isAdmin()
+            && request.resource.data.keys().hasOnly(['counts'])
+            && request.resource.data.counts is map
+          || isVoter() && voterBallotOk(pollId)
+        );
+        allow delete: if false;
+      }
+
+      match /voteGuards/{uid} {
+        allow read: if false;
+        allow create: if uid == request.auth.uid && voterBallotOk(pollId);
+        allow update, delete: if false;
+      }
+
+      match /participation/{voterId} {
+        allow get: if signedIn() && participantShape(resource.data);
+        allow list: if isAdmin();
+        allow create: if isAdmin()
+            && request.resource.data.keys().hasOnly(['voterId', 'voterName', 'status', 'createdAt'])
+            && request.resource.data.voterId == voterId
+            && request.resource.data.status == 'pending'
+            && request.resource.data.voterName is string
+            && request.resource.data.createdAt is number
+          || isVoter() && voterBallotOk(pollId) && request.resource.data.voterId == voterId;
+        allow update: if isAdmin()
+            && participantShape(request.resource.data)
+            && request.resource.data.voterId == voterId
+          || isVoter() && voterBallotOk(pollId) && request.resource.data.voterId == voterId;
+        allow delete: if isAdmin() && resource.data.status != 'completed';
+      }
+    }
+
+    match /voters/{voterId} {
+      allow read: if signedIn()
+        && resource.data.keys().hasOnly(['name', 'externalQrId', 'memberNo', 'active', 'createdAt']);
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'externalQrId', 'active', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.externalQrId is string
+        && request.resource.data.externalQrId.size() <= 80
+        && request.resource.data.active == true
+        && request.resource.data.createdAt is number;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    function ownedCheckin(fields) {
+      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid'])
+        && fields.voterId is string
+        && fields.voterName is string
+        && fields.voterName.size() > 0
+        && fields.voterName.size() <= 40
+        && fields.claimedAt is number
+        && fields.claimToken is string
+        && fields.claimToken.size() >= 32
+        && fields.claimToken.size() <= 40
+        && fields.authUid is string
+        && fields.authUid.size() > 0
+        && fields.authUid.size() <= 128;
+    }
+
+    // 이 변경 전 체크인에는 authUid 가 없다. 목록 쿼리가 깨지지 않게 읽기는 허용하고,
+    // 그 문서는 새 입장으로 덮어쓸 수 있다. authUid 가 있는 문서는 덮어쓰지 못한다.
+    function legacyCheckin(fields) {
+      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken'])
+        && fields.keys().hasAll(['voterId', 'voterName', 'claimedAt'])
+        && fields.voterId is string
+        && fields.voterName is string
+        && fields.claimedAt is number
+        && (!fields.keys().hasAny(['claimToken']) || fields.claimToken is string);
+    }
+
+    function checkinMatchesVoter(id) {
+      return exists(/databases/$(database)/documents/voters/$(id))
+        && get(/databases/$(database)/documents/voters/$(id)).data.name == request.resource.data.voterName
+        && get(/databases/$(database)/documents/voters/$(id)).data.active == true;
+    }
+
+    match /checkins/{voterId} {
+      // 목록 규칙은 문서 필드 조건이 쿼리와 맞지 않으면 통째로 거부된다.
+      // authUid 유무가 다른 예전 문서가 있어도 명단 조회가 되도록 읽기는 인증만 본다.
+      // 선택값은 이 컬렉션 쓰기에 넣을 수 없고, 투표는 authUid 가 본인일 때만 된다.
+      allow read: if signedIn();
+      allow create: if isVoter()
+        && !exists(/databases/$(database)/documents/checkins/$(voterId))
+        && ownedCheckin(request.resource.data)
+        && request.resource.data.voterId == voterId
+        && request.resource.data.authUid == request.auth.uid
+        && nearNow(request.resource.data.claimedAt)
+        && checkinMatchesVoter(voterId);
+      allow update: if resource != null
+        && isVoter()
+        && legacyCheckin(resource.data)
+        && ownedCheckin(request.resource.data)
+        && request.resource.data.voterId == voterId
+        && request.resource.data.authUid == request.auth.uid
+        && nearNow(request.resource.data.claimedAt)
+        && checkinMatchesVoter(voterId);
+      allow delete: if isAdmin();
+    }
+
+    match /meeting/{docId} {
+      allow read: if signedIn() && docId == 'current';
+      allow create, update: if isAdmin()
+        && docId == 'current'
+        && request.resource.data.keys().hasOnly(['roomCode', 'updatedAt'])
+        && request.resource.data.roomCode is string
+        && request.resource.data.roomCode.matches('^[0-9]{4}$')
+        && request.resource.data.updatedAt is number;
+      allow delete: if false;
+    }
+
+    function validSession(data) {
+      return data.keys().hasOnly(['eventId', 'voterId', 'voterName', 'checkedInAt', 'expiresAt', 'status'])
+        && data.eventId is string
+        && data.eventId.size() > 0
+        && data.eventId.size() <= 80
+        && data.voterId is string
+        && data.voterName is string
+        && data.checkedInAt is number
+        && data.expiresAt == data.checkedInAt + 43200000
+        && data.status == 'active';
+    }
+
+    match /attendanceSessions/{sessionId} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && sessionId.matches('^session_[0-9a-fA-F-]{36}$')
+        && validSession(request.resource.data)
+        && exists(/databases/$(database)/documents/voters/$(request.resource.data.voterId));
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /attendanceRawEvents/{eventId} {
+      allow read: if false;
+      allow create: if isAdmin()
+        && eventId.matches('^event_[0-9a-fA-F-]{36}$')
+        && request.resource.data.keys().hasOnly(['eventId', 'rawQrValue', 'receivedAt', 'matchedVoterId', 'status'])
+        && request.resource.data.eventId is string
+        && request.resource.data.rawQrValue is string
+        && request.resource.data.receivedAt is number
+        && request.resource.data.matchedVoterId is string
+        && request.resource.data.status == 'matched';
+      allow update, delete: if false;
+    }
+
+    match /attendanceOutbox/{outboxId} {
+      allow read: if false;
+      allow create: if isAdmin()
+        && outboxId.matches('^outbox_[0-9a-fA-F-]{36}$')
+        && request.resource.data.keys().hasOnly([
+          'eventId', 'voterId', 'attendanceSessionId', 'payload', 'status', 'retryCount'
+        ])
+        && request.resource.data.eventId is string
+        && request.resource.data.voterId is string
+        && request.resource.data.attendanceSessionId is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.retryCount == 0
+        && request.resource.data.payload.keys().hasOnly(['voterId', 'voterName', 'checkedInAt'])
+        && request.resource.data.payload.voterId == request.resource.data.voterId
+        && request.resource.data.payload.voterName is string
+        && request.resource.data.payload.checkedInAt is number;
+      allow update, delete: if false;
+    }
+  }
+}

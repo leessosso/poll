@@ -11,7 +11,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
 import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
 
@@ -19,6 +19,32 @@ const MEETING_DOC = doc(db, 'meeting', 'current');
 
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function hasCheckinOwner(data: Record<string, unknown> | undefined): boolean {
+  return typeof data?.authUid === 'string' && data.authUid.length > 0;
+}
+
+function requireUid(): string {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('인증이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.');
+  return uid;
+}
+
+function tallyRef(pollId: string) {
+  return doc(db, 'polls', pollId, 'tally', 'current');
+}
+
+function emptyCounts(poll: Poll): Record<string, number> {
+  return Object.fromEntries(getOptions(poll).map((option) => [option, 0]));
+}
+
+function permissionError(err: unknown, fallback: string): Error {
+  const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+  if (code === 'permission-denied' || code === 'firestore/permission-denied') {
+    return new Error(fallback);
+  }
+  return err instanceof Error ? err : new Error(fallback);
+}
 
 export function getEventId(poll: Poll): string {
   return poll.eventId?.trim() || DEFAULT_EVENT_ID;
@@ -90,21 +116,21 @@ export async function startPollWithParticipation(poll: Poll): Promise<void> {
   const durationSeconds = getDefaultDurationSeconds(poll);
   const endsAt = now + durationSeconds * 1000;
   const batch = writeBatch(db);
-  const options = getOptions(poll);
-  const initialResults = Object.fromEntries(options.map((option) => [option, poll.results?.[option] ?? 0]));
 
   batch.update(doc(db, 'polls', poll.id), {
     status: 'active',
     startedAt: now,
     endsAt,
     durationSeconds,
-    results: initialResults,
   });
+  batch.set(tallyRef(poll.id), { counts: emptyCounts(poll) });
 
   if (poll.eligibilityMode === 'roster') {
     const checkinsSnap = await getDocs(collection(db, 'checkins'));
     checkinsSnap.docs.forEach((checkinDoc) => {
       const data = checkinDoc.data();
+      // authUid 없는 예전 체크인은 자리 점유가 아니므로 이번 투표 인원에 넣지 않는다.
+      if (!hasCheckinOwner(data)) return;
       batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
         voterId: data.voterId ?? checkinDoc.id,
         voterName: data.voterName ?? '이름 없음',
@@ -170,7 +196,8 @@ export async function finalizePoll(poll: Poll): Promise<void> {
 
     const updates: Record<string, unknown> = { status: 'closed', closedAt: now };
     if (stillPending.length > 0 && poll.allowAbstain) {
-      updates['results.기권'] = increment(stillPending.length);
+      updates.castCount = increment(stillPending.length);
+      tx.update(tallyRef(poll.id), { 'counts.기권': increment(stillPending.length) });
     }
     tx.update(pollRef, updates);
   });
@@ -182,10 +209,12 @@ export async function castAttendanceVote(
   session: VoterSession,
 ): Promise<void> {
   const now = Date.now();
+  const uid = requireUid();
   const sessionRef = doc(db, 'attendanceSessions', session.sessionId);
   const pollRef = doc(db, 'polls', poll.id);
   const participantRef = doc(db, 'polls', poll.id, 'participation', session.voterId);
 
+  try {
   await runTransaction(db, async (tx) => {
     const [sessionSnap, pollSnap, participantSnap] = await Promise.all([
       tx.get(sessionRef),
@@ -221,10 +250,16 @@ export async function castAttendanceVote(
       },
       { merge: true },
     );
-    tx.update(pollRef, {
-      [`results.${choice}`]: increment(1),
+    tx.update(pollRef, { castCount: increment(1) });
+    tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
+    tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), {
+      voterId: session.voterId,
+      sessionId: session.sessionId,
     });
   });
+  } catch (err) {
+    throw permissionError(err, '투표를 저장하지 못했습니다. 이미 참여했거나 세션이 끝났을 수 있습니다.');
+  }
 }
 
 export async function togglePollResults(poll: Poll): Promise<void> {
@@ -248,13 +283,16 @@ export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<R
     const [meetingSnap, checkinSnap] = await Promise.all([tx.get(MEETING_DOC), tx.get(checkinRef)]);
     const expected = meetingSnap.exists() ? String(meetingSnap.data().roomCode ?? '') : '';
     if (!expected || expected !== normalizedCode) throw new Error('입장 코드가 맞지 않습니다.');
-    if (checkinSnap.exists()) throw new Error('이미 다른 분이 선택한 이름입니다.');
+    if (checkinSnap.exists() && hasCheckinOwner(checkinSnap.data())) {
+      throw new Error('이미 다른 분이 선택한 이름입니다.');
+    }
 
     tx.set(checkinRef, {
       voterId: voter.id,
       voterName: voter.name,
       claimedAt: Date.now(),
       claimToken,
+      authUid: requireUid(),
     });
   });
 
@@ -326,10 +364,12 @@ export async function releaseRosterClaim(voterId: string, activePoll: Poll | nul
 
 export async function castRosterVote(poll: Poll, choice: string, claim: RosterClaim): Promise<void> {
   const now = Date.now();
+  const uid = requireUid();
   const pollRef = doc(db, 'polls', poll.id);
   const checkinRef = doc(db, 'checkins', claim.voterId);
   const participantRef = doc(db, 'polls', poll.id, 'participation', claim.voterId);
 
+  try {
   await runTransaction(db, async (tx) => {
     const [checkinSnap, pollSnap, participantSnap] = await Promise.all([
       tx.get(checkinRef),
@@ -350,6 +390,34 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
     if (participantSnap.data().status === 'completed') throw new Error('이미 투표를 완료했습니다.');
 
     tx.update(participantRef, { status: 'completed', completedAt: now });
-    tx.update(pollRef, { [`results.${choice}`]: increment(1) });
+    tx.update(pollRef, { castCount: increment(1) });
+    tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
+    tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { voterId: claim.voterId });
   });
+  } catch (err) {
+    throw permissionError(err, '투표를 저장하지 못했습니다. 이미 참여했거나 입장이 해제됐을 수 있습니다.');
+  }
+}
+
+export async function castOpenVote(poll: Poll, choice: string): Promise<void> {
+  const now = Date.now();
+  const pollRef = doc(db, 'polls', poll.id);
+  const uid = requireUid();
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const pollSnap = await tx.get(pollRef);
+      if (!pollSnap.exists()) throw new Error('투표를 찾을 수 없습니다.');
+      const currentPoll = { id: pollSnap.id, ...pollSnap.data() } as Poll;
+      if (currentPoll.status !== 'active') throw new Error('진행 중인 투표가 아닙니다.');
+      if (currentPoll.endsAt && now >= currentPoll.endsAt) throw new Error('투표 시간이 종료되었습니다.');
+      if (!getOptions(currentPoll).includes(choice)) throw new Error('선택할 수 없는 항목입니다.');
+
+      tx.update(pollRef, { castCount: increment(1) });
+      tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
+      tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { createdAt: now });
+    });
+  } catch (err) {
+    throw permissionError(err, '이미 투표했거나 투표를 저장하지 못했습니다.');
+  }
 }
