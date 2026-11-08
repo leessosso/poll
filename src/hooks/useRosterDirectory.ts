@@ -15,14 +15,15 @@ interface UseRosterDirectoryResult {
   loading: boolean;
 }
 
-export function useRosterDirectory(): UseRosterDirectoryResult {
+export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRosterDirectoryResult {
   const [voters, setVoters] = useState<Voter[]>([]);
   const [checkins, setCheckins] = useState<RosterCheckin[]>([]);
   const [votersReady, setVotersReady] = useState(false);
   const [checkinsReady, setCheckinsReady] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'voters'), orderBy('name', 'asc')), (snap) => {
+    const collectionName = source === 'admin' ? 'voters' : 'voterDirectory';
+    const unsub = onSnapshot(query(collection(db, collectionName), orderBy('name', 'asc')), (snap) => {
       setVoters(
         snap.docs.map((voterDoc) => {
           const data = voterDoc.data();
@@ -39,7 +40,7 @@ export function useRosterDirectory(): UseRosterDirectoryResult {
       setVotersReady(true);
     });
     return unsub;
-  }, []);
+  }, [source]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'checkins'), (snap) => {
