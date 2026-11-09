@@ -24,7 +24,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const MID = 'mtg_11111111-2222-4333-8444-555555555555';
 const MID2 = 'mtg_99999999-8888-4777-8666-555555555555';
-const CODE = '4821';
+const CODE = '482913';
 
 function codeHash(meetingId, code) {
   return createHash('sha256').update(`${meetingId}:${code}`).digest('hex');
@@ -121,7 +121,7 @@ describe('firestore rules', () => {
 
     await assertFails(getDoc(doc(unauth(), 'polls/poll1')));
     await assertFails(getDoc(doc(voter(), 'attendanceRawEvents/event_' + UUID)));
-    await assertFails(setDoc(doc(voter(), 'meeting/current'), { roomCode: '1234', updatedAt: Date.now() }));
+    await assertFails(setDoc(doc(voter(), 'meeting/current'), { roomCode: '123456', updatedAt: Date.now() }));
     await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
     await assertFails(setDoc(doc(voter(), 'polls/new'), pollData({ status: 'waiting', castCount: 0 })));
   });
@@ -142,7 +142,7 @@ describe('firestore rules', () => {
       active: true,
       createdAt: now,
     }));
-    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '5678', meetingId: MID, updatedAt: now }));
+    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '567890', meetingId: MID, updatedAt: now }));
     await assertSucceeds(deleteDoc(doc(db, 'voters/shell-voter')));
 
     const anon = testEnv.authenticatedContext('anon-voter').firestore();
@@ -150,7 +150,7 @@ describe('firestore rules', () => {
     const waiting = pollData({ status: 'waiting', startedAt: null, endsAt: null, castCount: 0 });
     await assertFails(setDoc(doc(anon, 'polls/by-anon'), waiting));
     await assertFails(setDoc(doc(member, 'polls/by-member'), waiting));
-    await assertFails(setDoc(doc(member, 'meeting/current'), { roomCode: '0000', meetingId: MID, updatedAt: now }));
+    await assertFails(setDoc(doc(member, 'meeting/current'), { roomCode: '000000', meetingId: MID, updatedAt: now }));
     await assertFails(deleteDoc(doc(anon, 'voters/v1')));
     await assertFails(getDoc(doc(unauth(), 'polls/poll-shell')));
   });
@@ -168,9 +168,12 @@ describe('firestore rules', () => {
       active: true,
       createdAt: now,
     }));
-    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '1234', meetingId: MID, updatedAt: now }));
+    await assertSucceeds(setDoc(doc(db, 'meeting/current'), { roomCode: '123456', meetingId: MID, updatedAt: now }));
+    // 입장 코드는 6자리만 저장된다.
+    await assertFails(setDoc(doc(db, 'meeting/current'), { roomCode: '1234', meetingId: MID, updatedAt: now }));
+    await assertFails(setDoc(doc(db, 'meeting/current'), { roomCode: '1234567', meetingId: MID, updatedAt: now }));
     await assertSucceeds(setDoc(doc(db, 'meetingPublic/current'), { meetingId: MID, updatedAt: now }));
-    await assertSucceeds(setDoc(doc(db, 'entryCodes/' + codeHash(MID, '1234')), { meetingId: MID, createdAt: now }));
+    await assertSucceeds(setDoc(doc(db, 'entryCodes/' + codeHash(MID, '123456')), { meetingId: MID, createdAt: now }));
     await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
   });
 
@@ -195,7 +198,7 @@ describe('firestore rules', () => {
     await seedVoters();
 
     // 틀린 코드, 지난 모임 코드, 다른 모임 id 는 거부한다.
-    await assertFails(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417, code: '0000' }));
+    await assertFails(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417, code: '000000' }));
     await seed(async (db) => {
       await setDoc(doc(db, 'entryCodes/' + codeHash(MID2, CODE)), { meetingId: MID2, createdAt: 1 });
     });
@@ -242,15 +245,15 @@ describe('firestore rules', () => {
     const db = admin();
     const batch = writeBatch(db);
     batch.delete(doc(db, 'entryCodes/' + codeHash(MID, CODE)));
-    batch.set(doc(db, 'entryCodes/' + codeHash(MID2, '7777')), { meetingId: MID2, createdAt: now });
-    batch.set(doc(db, 'meeting/current'), { roomCode: '7777', meetingId: MID2, updatedAt: now });
+    batch.set(doc(db, 'entryCodes/' + codeHash(MID2, '777777')), { meetingId: MID2, createdAt: now });
+    batch.set(doc(db, 'meeting/current'), { roomCode: '777777', meetingId: MID2, updatedAt: now });
     batch.set(doc(db, 'meetingPublic/current'), { meetingId: MID2, updatedAt: now });
     await assertSucceeds(batch.commit());
 
     // 지난 모임 코드로는 더 입장하지 못한다.
     await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'v2', name: '이영희', badge: 500 }));
     // 지난 모임에서 잡은 이름과 번호도 새 모임에서는 비어 있다.
-    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { voterId: 'v1', badge: 417, mid: MID2, code: '7777' }));
+    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { voterId: 'v1', badge: 417, mid: MID2, code: '777777' }));
     const old = await assertSucceeds(getDoc(doc(admin(), `checkins/${MID}_voter-1`)));
     assert.equal(old.data().voterId, 'v1');
 

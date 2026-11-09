@@ -574,7 +574,7 @@ service cloud.firestore {
         && docId == 'current'
         && request.resource.data.keys().hasOnly(['roomCode', 'meetingId', 'updatedAt'])
         && request.resource.data.roomCode is string
-        && request.resource.data.roomCode.matches('^[0-9]{4}$')
+        && request.resource.data.roomCode.matches('^[0-9]{6}$')
         && validMeetingId(request.resource.data.meetingId)
         && request.resource.data.updatedAt is number;
       allow delete: if false;

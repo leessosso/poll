@@ -188,12 +188,12 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
         <div>
           <h2 className="font-bold text-gray-800">현장 입장</h2>
           <p className="text-sm text-gray-400 mt-1">
-            이 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다. 모임마다 '새 모임 시작'으로 입장을 비우고 시작하세요.
+            이 6자리 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다. 모임마다 '새 모임 시작'으로 입장을 비우고 시작하세요.
           </p>
         </div>
         <div className="text-right">
           <p className="text-3xl font-bold tracking-widest text-primary">
-            {codeLoading ? '----' : meetingId && roomCode ? roomCode : '없음'}
+            {codeLoading ? '------' : meetingId && roomCode ? roomCode : '없음'}
           </p>
           <div className="flex flex-col items-end gap-1 mt-1">
             {meetingId && roomCode && (

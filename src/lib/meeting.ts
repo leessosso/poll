@@ -10,8 +10,12 @@ export function newMeetingId(): string {
   return `mtg_${crypto.randomUUID()}`;
 }
 
+export const ROOM_CODE_LENGTH = 6;
+
+/** 6자리 입장 코드(100000~999999). 브라우저 난수로 만든다. */
 export function generateRoomCode(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
+  const [value] = crypto.getRandomValues(new Uint32Array(1));
+  return String(100000 + (value % 900000));
 }
 
 /** 규칙은 원문 대신 sha256(meetingId:code) 이름의 entryCodes 문서가 있는지만 본다. */

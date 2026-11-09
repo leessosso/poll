@@ -13,7 +13,7 @@ import {
   type WriteBatch,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { MEETING_PUBLIC_DOC, checkinId, claimedNameId, entryCodeHash, lampId } from './meeting';
+import { MEETING_PUBLIC_DOC, ROOM_CODE_LENGTH, checkinId, claimedNameId, entryCodeHash, lampId } from './meeting';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
 import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
 
@@ -399,7 +399,9 @@ const CLAIM_REJECTED =
 export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<RosterClaim> {
   const meetingId = await requireMeetingId();
   const code = roomCode.trim();
-  if (!/^[0-9]{4}$/.test(code)) throw new Error('입장 코드 4자리를 입력해 주세요.');
+  if (!new RegExp(`^[0-9]{${ROOM_CODE_LENGTH}}$`).test(code)) {
+    throw new Error(`입장 코드 ${ROOM_CODE_LENGTH}자리 숫자를 입력해 주세요.`);
+  }
   const codeHash = await entryCodeHash(meetingId, code);
   const claimToken = crypto.randomUUID();
   const uid = requireUid();
