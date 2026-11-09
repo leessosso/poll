@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { usePolls } from '../hooks/usePolls';
 import { usePresence } from '../hooks/usePresence';
 import { useVoterAuth } from '../hooks/useVoterAuth';
@@ -72,11 +72,25 @@ function VoterScreen() {
           <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
         )}
         {claim && (
-          <p className="text-white/80 text-sm mt-1">{claim.voterName}님 입장 완료</p>
+          <p className="text-white/80 text-sm mt-1">
+            {claim.voterName}님 입장 완료
+            {claim.badge ? ` · ${claim.badge}번` : ''}
+          </p>
         )}
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
+        {claim?.badge ? (
+          <div className="bg-surface rounded-2xl border border-border px-5 py-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-500">내 번호</p>
+              <Link to="/board" target="_blank" rel="noreferrer" className="text-sm font-medium text-primary">
+                현황판에서 이 번호를 확인하세요
+              </Link>
+            </div>
+            <p className="text-4xl font-bold tabular-nums text-primary">{claim.badge}</p>
+          </div>
+        ) : null}
         {activePoll && requiresAttendance && !session ? (
           <VoterAuthGate loading={sessionLoading} error={sessionError} />
         ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claimReady ? (

@@ -365,6 +365,77 @@ describe('firestore rules', () => {
     }));
   });
 
+  test('현황판 번호는 본인 입장으로만 만들고 투표한 뒤에만 켜진다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'voters/v2'), { name: '이영희', externalQrId: '', active: true, createdAt: 1 });
+      await setDoc(doc(db, 'polls/poll1'), pollData());
+      await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll1/participation/v1'), {
+        voterId: 'v1',
+        voterName: '김철수',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+
+    const owner = voter();
+    const other = voter('voter-2');
+    const claim = {
+      voterId: 'v1',
+      voterName: '김철수',
+      claimedAt: Date.now(),
+      claimToken: UUID,
+      authUid: 'voter-1',
+      badge: 417,
+    };
+    await assertSucceeds(runTransaction(owner, async (tx) => {
+      tx.set(doc(owner, 'checkins/v1'), claim);
+      tx.set(doc(owner, 'lamps/417'), {
+        badge: 417,
+        state: 'seated',
+        pollId: '',
+        voterId: 'v1',
+      });
+    }));
+    await assertFails(runTransaction(other, async (tx) => {
+      tx.set(doc(other, 'checkins/v2'), {
+        ...claim,
+        voterId: 'v2',
+        voterName: '이영희',
+        authUid: 'voter-2',
+        badge: 417,
+      });
+      tx.set(doc(other, 'lamps/417'), {
+        badge: 417,
+        state: 'seated',
+        pollId: '',
+        voterId: 'v2',
+      });
+    }));
+    await assertFails(updateDoc(doc(owner, 'lamps/417'), { state: 'voted' }));
+    await assertSucceeds(setDoc(doc(admin(), 'lamps/417'), {
+      badge: 417,
+      state: 'pending',
+      pollId: 'poll1',
+      voterId: 'v1',
+    }));
+    await assertSucceeds(runTransaction(owner, async (tx) => {
+      tx.update(doc(owner, 'polls/poll1/participation/v1'), {
+        status: 'completed',
+        completedAt: Date.now(),
+      });
+      tx.update(doc(owner, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(owner, 'polls/poll1/tally/current'), { 'counts.찬성': increment(1) });
+      tx.set(doc(owner, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+      tx.update(doc(owner, 'lamps/417'), { state: 'voted' });
+    }));
+    const lamp = await assertSucceeds(getDoc(doc(voter('voter-2'), 'lamps/417')));
+    assert.equal(lamp.data().state, 'voted');
+    assert.equal(lamp.data().voterName, undefined);
+    await assertFails(deleteDoc(doc(voter(), 'lamps/417')));
+  });
+
   test('누구나 참여 투표는 같은 계정으로 한 번만 집계된다', async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll-open'), pollData({ eligibilityMode: 'open' }));

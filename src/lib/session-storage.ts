@@ -38,6 +38,9 @@ export function loadRosterClaim(): RosterClaim | null {
       clearRosterClaim();
       return null;
     }
+    if (parsed.badge != null && (!Number.isInteger(parsed.badge) || parsed.badge < 1)) {
+      delete parsed.badge;
+    }
     return parsed;
   } catch {
     clearRosterClaim();

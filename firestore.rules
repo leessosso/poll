@@ -364,7 +364,7 @@ service cloud.firestore {
     }
 
     function ownedCheckin(fields) {
-      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid'])
+      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid', 'badge'])
         && fields.voterId is string
         && fields.voterName is string
         && fields.voterName.size() > 0
@@ -375,7 +375,8 @@ service cloud.firestore {
         && fields.claimToken.size() <= 40
         && fields.authUid is string
         && fields.authUid.size() > 0
-        && fields.authUid.size() <= 128;
+        && fields.authUid.size() <= 128
+        && (!fields.keys().hasAny(['badge']) || (fields.badge is int && fields.badge >= 100 && fields.badge <= 999));
     }
 
     // 이 변경 전 체크인에는 authUid 가 없다. 목록 쿼리가 깨지지 않게 읽기는 허용하고,
@@ -414,7 +415,58 @@ service cloud.firestore {
         && request.resource.data.voterId == voterId
         && request.resource.data.authUid == request.auth.uid
         && nearNow(request.resource.data.claimedAt)
-        && checkinMatchesVoter(voterId);
+        && checkinMatchesVoter(voterId)
+        || isAdmin()
+        && resource.data.authUid is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['badge'])
+        && request.resource.data.badge is int
+        && request.resource.data.badge >= 100
+        && request.resource.data.badge <= 999;
+      allow delete: if isAdmin();
+    }
+
+    function lampShape(data) {
+      return data.keys().hasOnly(['badge', 'state', 'pollId', 'voterId'])
+        && data.badge is int
+        && data.badge >= 100
+        && data.badge <= 999
+        && data.state in ['seated', 'pending', 'voted']
+        && data.pollId is string
+        && data.pollId.size() <= 80
+        && data.voterId is string
+        && data.voterId.size() > 0
+        && data.voterId.size() <= 128;
+    }
+
+    // 현황판은 번호와 투표 여부만 목록으로 읽는다. 이름은 이 문서에 없다.
+    // voterId 는 번호 소유를 규칙에서 확인하는 용도다.
+    match /lamps/{badgeId} {
+      allow read: if signedIn();
+      allow create: if lampShape(request.resource.data)
+        && request.resource.data.badge == int(badgeId)
+        && (
+          isAdmin()
+          || (
+            isVoter()
+            && request.resource.data.state == 'seated'
+            && request.resource.data.pollId == ''
+            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.badge == int(badgeId)
+            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.authUid == request.auth.uid
+            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.voterId == request.resource.data.voterId
+          )
+        );
+      allow update: if isAdmin()
+          && lampShape(request.resource.data)
+          && request.resource.data.badge == int(badgeId)
+          && request.resource.data.voterId == resource.data.voterId
+        || isVoter()
+          && resource.data.state == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
+          && request.resource.data.state == 'voted'
+          && get(/databases/$(database)/documents/checkins/$(resource.data.voterId)).data.authUid == request.auth.uid
+          && get(/databases/$(database)/documents/checkins/$(resource.data.voterId)).data.badge == int(badgeId)
+          && getAfter(partPath(resource.data.pollId, resource.data.voterId)).data.status == 'completed'
+          && getAfter(partPath(resource.data.pollId, resource.data.voterId)).data.voterId == resource.data.voterId;
       allow delete: if isAdmin();
     }
 

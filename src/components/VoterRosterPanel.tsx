@@ -19,7 +19,7 @@ interface VoterRosterPanelProps {
 }
 
 export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPanelProps) {
-  const { voters, claimedIds } = useRosterDirectory('admin');
+  const { voters, claimedIds, badgeByVoterId } = useRosterDirectory('admin');
   const { roomCode, loading: codeLoading } = useMeetingCode();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [namesText, setNamesText] = useState('');
@@ -208,7 +208,9 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
               </div>
               <div className="flex items-center gap-2">
                 <span className={`text-xs ${claimedIds.has(voter.id) ? 'text-green-600' : 'text-gray-400'}`}>
-                  {claimedIds.has(voter.id) ? '입장함' : '미입장'}
+                  {claimedIds.has(voter.id)
+                    ? `입장함${badgeByVoterId.get(voter.id) ? ` · ${badgeByVoterId.get(voter.id)}번` : ''}`
+                    : '미입장'}
                 </span>
                 {claimedIds.has(voter.id) && (
                   <button

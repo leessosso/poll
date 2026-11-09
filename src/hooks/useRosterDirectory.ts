@@ -6,12 +6,14 @@ import type { Voter } from '../types';
 export interface RosterCheckin {
   voterId: string;
   voterName: string;
+  badge: number | null;
 }
 
 interface UseRosterDirectoryResult {
   voters: Voter[];
   checkins: RosterCheckin[];
   claimedIds: Set<string>;
+  badgeByVoterId: Map<string, number>;
   loading: boolean;
 }
 
@@ -48,9 +50,11 @@ export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRo
         snap.docs.flatMap((checkinDoc) => {
           const data = checkinDoc.data();
           if (typeof data.authUid !== 'string' || data.authUid.length === 0) return [];
+          const badge = data.badge;
           return [{
             voterId: checkinDoc.id,
             voterName: data.voterName ?? '이름 없음',
+            badge: typeof badge === 'number' && Number.isInteger(badge) ? badge : null,
           }];
         }),
       );
@@ -60,6 +64,13 @@ export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRo
   }, []);
 
   const claimedIds = useMemo(() => new Set(checkins.map((checkin) => checkin.voterId)), [checkins]);
+  const badgeByVoterId = useMemo(() => {
+    const badges = new Map<string, number>();
+    checkins.forEach((checkin) => {
+      if (checkin.badge != null) badges.set(checkin.voterId, checkin.badge);
+    });
+    return badges;
+  }, [checkins]);
 
-  return { voters, checkins, claimedIds, loading: !votersReady || !checkinsReady };
+  return { voters, checkins, claimedIds, badgeByVoterId, loading: !votersReady || !checkinsReady };
 }

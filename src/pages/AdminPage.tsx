@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { isAdminAccount } from '../lib/admin-auth';
@@ -19,6 +20,7 @@ import type { Poll } from '../types';
 import PollAdminCard from '../components/PollAdminCard';
 import CreatePollForm from '../components/CreatePollForm';
 import PollParticipationPanel from '../components/PollParticipationPanel';
+import VoteBoard from '../components/VoteBoard';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
@@ -309,6 +311,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               진입 {visitorCount}명 · 현재 {presenceCount}명
             </span>
           </div>
+          <Link to="/board" target="_blank" rel="noreferrer" className="text-sm text-white/80 underline">
+            현황판
+          </Link>
           <button type="button" onClick={onLogout} className="text-sm text-white/80 underline">
             로그아웃
           </button>
@@ -349,6 +354,8 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           </section>
         )}
+
+        <VoteBoard layout="panel" />
 
         <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} />
 

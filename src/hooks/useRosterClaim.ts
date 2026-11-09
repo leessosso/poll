@@ -24,6 +24,14 @@ export function useRosterClaim(): UseRosterClaimResult {
       if (!owned || token !== claim.claimToken) {
         clearRosterClaim();
         setClaim(null);
+        setReady(true);
+        return;
+      }
+      const badge = data?.badge;
+      if (typeof badge === 'number' && Number.isInteger(badge) && badge !== claim.badge) {
+        const next = { ...claim, badge };
+        storeRosterClaim(next);
+        setClaim(next);
       }
       setReady(true);
     });

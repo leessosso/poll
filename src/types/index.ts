@@ -68,6 +68,15 @@ export interface RosterClaim {
   voterId: string;
   voterName: string;
   claimToken: string;
+  /** 현황판에 보이는 번호. 예전 입장에는 없다. */
+  badge?: number;
+}
+
+/** 현황판 한 칸. 이름은 넣지 않는다. */
+export interface BoardLamp {
+  badge: number;
+  state: 'seated' | 'pending' | 'voted';
+  pollId: string;
 }
 
 export interface Participation {

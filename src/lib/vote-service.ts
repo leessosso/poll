@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   increment,
   query,
@@ -10,6 +11,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  type WriteBatch,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
@@ -19,6 +21,15 @@ const MEETING_DOC = doc(db, 'meeting', 'current');
 
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const BADGE_MIN = 100;
+const BADGE_MAX = 999;
+
+class BadgeTakenError extends Error {
+  constructor() {
+    super('입장 번호가 겹쳤습니다.');
+    this.name = 'BadgeTakenError';
+  }
+}
 
 function hasCheckinOwner(data: Record<string, unknown> | undefined): boolean {
   return typeof data?.authUid === 'string' && data.authUid.length > 0;
@@ -32,6 +43,39 @@ function requireUid(): string {
 
 function tallyRef(pollId: string) {
   return doc(db, 'polls', pollId, 'tally', 'current');
+}
+
+function lampRef(badge: number) {
+  return doc(db, 'lamps', String(badge));
+}
+
+function badgeOf(data: Record<string, unknown> | undefined): number | null {
+  const badge = data?.badge;
+  return typeof badge === 'number' && Number.isInteger(badge) && badge >= BADGE_MIN && badge <= BADGE_MAX
+    ? badge
+    : null;
+}
+
+function pickBadge(used: Set<number>): number {
+  const span = BADGE_MAX - BADGE_MIN + 1;
+  if (used.size >= span) throw new Error('입장 번호를 더 만들 수 없습니다.');
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const badge = BADGE_MIN + Math.floor(Math.random() * span);
+    if (!used.has(badge)) return badge;
+  }
+  for (let badge = BADGE_MIN; badge <= BADGE_MAX; badge += 1) {
+    if (!used.has(badge)) return badge;
+  }
+  throw new Error('입장 번호를 더 만들 수 없습니다.');
+}
+
+async function commitOps(ops: Array<(batch: WriteBatch) => void>): Promise<void> {
+  const size = 400;
+  for (let index = 0; index < ops.length; index += size) {
+    const batch = writeBatch(db);
+    ops.slice(index, index + size).forEach((op) => op(batch));
+    await batch.commit();
+  }
 }
 
 function emptyCounts(poll: Poll): Record<string, number> {
@@ -124,29 +168,51 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
   const now = Date.now();
   const durationSeconds = getDefaultDurationSeconds(poll);
   const endsAt = now + durationSeconds * 1000;
-  const batch = writeBatch(db);
-
-  batch.update(doc(db, 'polls', poll.id), {
-    status: 'active',
-    startedAt: now,
-    endsAt,
-    durationSeconds,
-    expectedCount,
-  });
-  batch.set(tallyRef(poll.id), { counts: emptyCounts(poll) });
+  const ops: Array<(batch: WriteBatch) => void> = [];
 
   if (poll.eligibilityMode === 'roster') {
-    const checkinsSnap = await getDocs(collection(db, 'checkins'));
+    const [checkinsSnap, lampsSnap] = await Promise.all([
+      getDocs(collection(db, 'checkins')),
+      getDocs(collection(db, 'lamps')),
+    ]);
+    const used = new Set<number>();
+    lampsSnap.docs.forEach((lampDoc) => {
+      const badge = Number(lampDoc.id);
+      if (Number.isInteger(badge)) used.add(badge);
+    });
+    checkinsSnap.docs.forEach((checkinDoc) => {
+      const badge = badgeOf(checkinDoc.data());
+      if (badge) used.add(badge);
+    });
+
+    const liveBadges = new Set<string>();
     checkinsSnap.docs.forEach((checkinDoc) => {
       const data = checkinDoc.data();
       // authUid 없는 예전 체크인은 자리 점유가 아니므로 이번 투표 인원에 넣지 않는다.
       if (!hasCheckinOwner(data)) return;
-      batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
-        voterId: data.voterId ?? checkinDoc.id,
+      const voterId = typeof data.voterId === 'string' ? data.voterId : checkinDoc.id;
+      let badge = badgeOf(data);
+      if (!badge) {
+        badge = pickBadge(used);
+        used.add(badge);
+        ops.push((batch) => batch.update(checkinDoc.ref, { badge }));
+      }
+      liveBadges.add(String(badge));
+      ops.push((batch) => batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
+        voterId,
         voterName: data.voterName ?? '이름 없음',
         status: 'pending',
         createdAt: now,
-      });
+      }));
+      ops.push((batch) => batch.set(lampRef(badge), {
+        badge,
+        state: 'pending',
+        pollId: poll.id,
+        voterId,
+      }));
+    });
+    lampsSnap.docs.forEach((lampDoc) => {
+      if (!liveBadges.has(lampDoc.id)) ops.push((batch) => batch.delete(lampDoc.ref));
     });
   }
 
@@ -164,16 +230,24 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
       const session = { id: sessionDoc.id, ...sessionDoc.data() } as AttendanceSession;
       if (session.expiresAt <= now || voterIds.has(session.voterId)) return;
       voterIds.add(session.voterId);
-      batch.set(doc(db, 'polls', poll.id, 'participation', session.voterId), {
+      ops.push((batch) => batch.set(doc(db, 'polls', poll.id, 'participation', session.voterId), {
         voterId: session.voterId,
         voterName: session.voterName,
         status: 'pending',
         createdAt: now,
-      });
+      }));
     });
   }
 
-  await batch.commit();
+  ops.push((batch) => batch.set(tallyRef(poll.id), { counts: emptyCounts(poll) }));
+  ops.push((batch) => batch.update(doc(db, 'polls', poll.id), {
+    status: 'active',
+    startedAt: now,
+    endsAt,
+    durationSeconds,
+    expectedCount,
+  }));
+  await commitOps(ops);
 }
 
 export async function finalizePoll(poll: Poll): Promise<void> {
@@ -293,28 +367,63 @@ export async function updateRoomCode(roomCode: string): Promise<void> {
 }
 
 export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<RosterClaim> {
-  const checkinRef = doc(db, 'checkins', voter.id);
   const claimToken = crypto.randomUUID();
   const normalizedCode = roomCode.trim();
+  const used = new Set<number>();
+  const existing = await getDocs(collection(db, 'lamps'));
+  existing.docs.forEach((lampDoc) => {
+    const badge = Number(lampDoc.id);
+    if (Number.isInteger(badge)) used.add(badge);
+  });
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const badge = pickBadge(used);
+    try {
+      await writeRosterClaim(voter, normalizedCode, claimToken, badge);
+      return { voterId: voter.id, voterName: voter.name, claimToken, badge };
+    } catch (err) {
+      if (!(err instanceof BadgeTakenError)) throw err;
+      used.add(badge);
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('입장 번호를 정하지 못했습니다.');
+}
+
+async function writeRosterClaim(voter: Voter, roomCode: string, claimToken: string, badge: number): Promise<void> {
+  const checkinRef = doc(db, 'checkins', voter.id);
+  const seatRef = lampRef(badge);
 
   await runTransaction(db, async (tx) => {
-    const [meetingSnap, checkinSnap] = await Promise.all([tx.get(MEETING_DOC), tx.get(checkinRef)]);
+    const [meetingSnap, checkinSnap, seatSnap] = await Promise.all([
+      tx.get(MEETING_DOC),
+      tx.get(checkinRef),
+      tx.get(seatRef),
+    ]);
     const expected = meetingSnap.exists() ? String(meetingSnap.data().roomCode ?? '') : '';
-    if (!expected || expected !== normalizedCode) throw new Error('입장 코드가 맞지 않습니다.');
+    if (!expected || expected !== roomCode) throw new Error('입장 코드가 맞지 않습니다.');
     if (checkinSnap.exists() && hasCheckinOwner(checkinSnap.data())) {
       throw new Error('이미 다른 분이 선택한 이름입니다.');
     }
+    if (seatSnap.exists()) throw new BadgeTakenError();
 
+    const authUid = requireUid();
     tx.set(checkinRef, {
       voterId: voter.id,
       voterName: voter.name,
       claimedAt: Date.now(),
       claimToken,
-      authUid: requireUid(),
+      authUid,
+      badge,
+    });
+    tx.set(seatRef, {
+      badge,
+      state: 'seated',
+      pollId: '',
+      voterId: voter.id,
     });
   });
-
-  return { voterId: voter.id, voterName: voter.name, claimToken };
 }
 
 export async function revokeAttendanceSession(sessionId: string): Promise<void> {
@@ -338,11 +447,16 @@ export async function removeVoterFromRoster(voterId: string, activePoll: Poll | 
     activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
 
   const directoryRef = doc(db, 'voterDirectory', voterId);
+  const checkinSnap = await getDoc(checkinRef);
+  const badge = badgeOf(checkinSnap.data());
+  const seatRef = badge ? lampRef(badge) : null;
+
   if (!tracksParticipation) {
     const batch = writeBatch(db);
     batch.delete(voterRef);
     batch.delete(directoryRef);
     batch.delete(checkinRef);
+    if (seatRef) batch.delete(seatRef);
     await batch.commit();
     await deleteAttendanceSessions(voterId);
     return;
@@ -350,13 +464,17 @@ export async function removeVoterFromRoster(voterId: string, activePoll: Poll | 
 
   const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
   await runTransaction(db, async (tx) => {
-    const participantSnap = await tx.get(participantRef);
+    const [participantSnap, seatSnap] = await Promise.all([
+      tx.get(participantRef),
+      seatRef ? tx.get(seatRef) : Promise.resolve(null),
+    ]);
     const completed = participantSnap.exists() && participantSnap.data().status === 'completed';
     tx.delete(voterRef);
     tx.delete(directoryRef);
     if (!completed) {
       if (participantSnap.exists()) tx.delete(participantRef);
       tx.delete(checkinRef);
+      if (seatSnap?.exists()) tx.delete(seatSnap.ref);
     }
   });
   await deleteAttendanceSessions(voterId);
@@ -367,19 +485,30 @@ export async function releaseRosterClaim(voterId: string, activePoll: Poll | nul
   const tracksParticipation =
     activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
 
+  const checkinSnap = await getDoc(checkinRef);
+  const badge = badgeOf(checkinSnap.data());
+  const seatRef = badge ? lampRef(badge) : null;
+
   if (!tracksParticipation) {
-    await deleteDoc(checkinRef);
+    const batch = writeBatch(db);
+    batch.delete(checkinRef);
+    if (seatRef) batch.delete(seatRef);
+    await batch.commit();
     return;
   }
 
   const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
   await runTransaction(db, async (tx) => {
-    const participantSnap = await tx.get(participantRef);
+    const [participantSnap, seatSnap] = await Promise.all([
+      tx.get(participantRef),
+      seatRef ? tx.get(seatRef) : Promise.resolve(null),
+    ]);
     if (participantSnap.exists() && participantSnap.data().status === 'completed') {
       throw new Error('이미 투표를 완료한 이름은 해제할 수 없습니다.');
     }
     if (participantSnap.exists()) tx.delete(participantRef);
     tx.delete(checkinRef);
+    if (seatSnap?.exists()) tx.delete(seatSnap.ref);
   });
 }
 
@@ -411,10 +540,21 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
     if (!participantSnap.exists()) throw new Error('이번 투표 명단에 없습니다.');
     if (participantSnap.data().status === 'completed') throw new Error('이미 투표를 완료했습니다.');
 
+    const badge = badgeOf(checkinSnap.data());
+    const seatSnap = badge ? await tx.get(lampRef(badge)) : null;
+    if (badge && seatSnap?.exists()) {
+      const seat = seatSnap.data();
+      const ownsSeat = seat.voterId === claim.voterId && seat.pollId === poll.id;
+      if (!ownsSeat || seat.state !== 'pending') {
+        throw new Error('현황판 번호를 확인하지 못했습니다. 다시 입장해 주세요.');
+      }
+    }
+
     tx.update(participantRef, { status: 'completed', completedAt: now });
     tx.update(pollRef, { castCount: increment(1) });
     tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { voterId: claim.voterId });
+    if (badge && seatSnap?.exists()) tx.update(lampRef(badge), { state: 'voted' });
   });
   } catch (err) {
     throw permissionError(err, '투표를 저장하지 못했습니다. 이미 참여했거나 입장이 해제됐을 수 있습니다.');
