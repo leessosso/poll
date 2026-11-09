@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { onSnapshot } from 'firebase/firestore';
+import { MEETING_DOC } from '../lib/meeting';
 
-export function useMeetingCode(): { roomCode: string; loading: boolean } {
-  const [roomCode, setRoomCode] = useState('');
-  const [loading, setLoading] = useState(true);
+/** 관리자 전용. 입장 코드 원문과 현재 모임 id. */
+export function useMeetingCode(): { roomCode: string; meetingId: string; loading: boolean } {
+  const [state, setState] = useState({ roomCode: '', meetingId: '', loading: true });
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'meeting', 'current'), (snap) => {
-      setRoomCode(snap.exists() ? String(snap.data().roomCode ?? '') : '');
-      setLoading(false);
-    });
-    return unsub;
+    return onSnapshot(
+      MEETING_DOC,
+      (snap) => {
+        const data = snap.exists() ? snap.data() : {};
+        setState({
+          roomCode: typeof data.roomCode === 'string' ? data.roomCode : '',
+          meetingId: typeof data.meetingId === 'string' ? data.meetingId : '',
+          loading: false,
+        });
+      },
+      () => setState({ roomCode: '', meetingId: '', loading: false }),
+    );
   }, []);
 
-  return { roomCode, loading };
+  return state;
 }

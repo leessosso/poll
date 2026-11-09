@@ -72,7 +72,19 @@ export default function PollAdminCard({
             {poll.status === 'closed' && <PollDecisionBadge poll={poll} />}
           </div>
           <div className="pt-4">
-            <ResultsBar poll={poll} />
+            {poll.status === 'closed' ? (
+              <ResultsBar poll={poll} />
+            ) : poll.status === 'active' ? (
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-center">
+                <p className="text-2xl font-bold tabular-nums text-gray-800">
+                  {poll.castCount}
+                  {typeof poll.expectedCount === 'number' ? ` / ${poll.expectedCount}` : ''}표
+                </p>
+                <p className="text-sm text-gray-500 mt-1">
+                  비밀투표라 진행 중에는 선택별 표 수를 보여 주지 않습니다. 마감 후 확인하세요.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2">

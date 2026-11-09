@@ -28,13 +28,18 @@ export function clearStoredVoterSession(): void {
   sessionStorage.removeItem(VOTER_SESSION_KEY);
 }
 
+// 입장 정보는 탭을 닫아도 남도록 localStorage 에 둔다.
+// 예전 버전이 sessionStorage 에 둔 값은 한 번 옮겨 온다.
 export function loadRosterClaim(): RosterClaim | null {
-  const raw = sessionStorage.getItem(ROSTER_CLAIM_KEY);
+  const legacy = sessionStorage.getItem(ROSTER_CLAIM_KEY);
+  if (legacy && !localStorage.getItem(ROSTER_CLAIM_KEY)) localStorage.setItem(ROSTER_CLAIM_KEY, legacy);
+  if (legacy) sessionStorage.removeItem(ROSTER_CLAIM_KEY);
+  const raw = localStorage.getItem(ROSTER_CLAIM_KEY);
   if (!raw) return null;
 
   try {
     const parsed = JSON.parse(raw) as RosterClaim;
-    if (!parsed.voterId || !parsed.claimToken || !parsed.voterName) {
+    if (!parsed.meetingId || !parsed.voterId || !parsed.claimToken || !parsed.voterName) {
       clearRosterClaim();
       return null;
     }
@@ -49,9 +54,10 @@ export function loadRosterClaim(): RosterClaim | null {
 }
 
 export function storeRosterClaim(claim: RosterClaim): void {
-  sessionStorage.setItem(ROSTER_CLAIM_KEY, JSON.stringify(claim));
+  localStorage.setItem(ROSTER_CLAIM_KEY, JSON.stringify(claim));
 }
 
 export function clearRosterClaim(): void {
+  localStorage.removeItem(ROSTER_CLAIM_KEY);
   sessionStorage.removeItem(ROSTER_CLAIM_KEY);
 }

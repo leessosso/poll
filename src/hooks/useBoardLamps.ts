@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { ensureVoterUser } from '../lib/voter-auth';
+import { useCurrentMeeting } from './useCurrentMeeting';
 import type { BoardLamp } from '../types';
 
 interface UseBoardLampsResult {
@@ -10,41 +11,41 @@ interface UseBoardLampsResult {
   error: string | null;
 }
 
+const NO_LAMPS: BoardLamp[] = [];
+
+/** 현재 모임의 번호만 읽는다. 예전 모임 번호는 남아 있어도 보이지 않는다. */
 export function useBoardLamps(): UseBoardLampsResult {
-  const [lamps, setLamps] = useState<BoardLamp[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { meetingId, loading: meetingLoading } = useCurrentMeeting();
+  const [state, setState] = useState<{ key: string; lamps: BoardLamp[]; error: string | null } | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, 'lamps'),
+    if (!meetingId) return;
+    return onSnapshot(
+      query(collection(db, 'lamps'), where('meetingId', '==', meetingId)),
       (snap) => {
         const next = snap.docs.flatMap((lampDoc) => {
           const data = lampDoc.data();
           const badge = data.badge;
-          const state = data.state;
+          const lampState = data.state;
           if (typeof badge !== 'number' || !Number.isInteger(badge)) return [];
-          if (state !== 'seated' && state !== 'pending' && state !== 'voted') return [];
+          if (lampState !== 'seated' && lampState !== 'pending' && lampState !== 'voted') return [];
           return [{
             badge,
-            state,
+            state: lampState,
             pollId: typeof data.pollId === 'string' ? data.pollId : '',
           } satisfies BoardLamp];
         });
         next.sort((a, b) => a.badge - b.badge);
-        setLamps(next);
-        setError(null);
-        setLoading(false);
+        setState({ key: meetingId, lamps: next, error: null });
       },
-      () => {
-        setError('현황을 불러오지 못했습니다.');
-        setLoading(false);
-      },
+      () => setState({ key: meetingId, lamps: NO_LAMPS, error: '현황을 불러오지 못했습니다.' }),
     );
-    return unsub;
-  }, []);
+  }, [meetingId]);
 
-  return { lamps, loading, error };
+  if (meetingLoading) return { lamps: NO_LAMPS, loading: true, error: null };
+  if (!meetingId) return { lamps: NO_LAMPS, loading: false, error: null };
+  if (!state || state.key !== meetingId) return { lamps: NO_LAMPS, loading: true, error: null };
+  return { lamps: state.lamps, loading: false, error: state.error };
 }
 
 /** 현황판은 관리자 세션이 있어도 열고, 없으면 익명으로 들어온다. */

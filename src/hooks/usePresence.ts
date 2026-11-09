@@ -66,13 +66,15 @@ export function usePresence(): void {
 
       async function registerPresence() {
         try {
-          await onDisconnect(presenceRef).remove();
+          // 규칙은 본인 authUid 가 있는 기록만 지우게 한다.
+          // 기록을 먼저 쓰고 나서 연결이 끊기면 지우도록 걸어야 권한 오류가 나지 않는다.
           await set(presenceRef, {
             clientId,
             authUid: uid,
             connectedAt: Date.now(),
             lastSeenAt: Date.now(),
           });
+          await onDisconnect(presenceRef).remove();
         } catch (err) {
           console.error('[presence] registration failed', err);
         }

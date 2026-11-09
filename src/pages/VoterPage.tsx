@@ -67,7 +67,7 @@ function VoterScreen() {
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-primary text-white px-5 py-4 shadow">
-        <h1 className="text-lg font-bold">등촌교회 2층년회 투표 시스템</h1>
+        <h1 className="text-lg font-bold">등촌교회 2청년회 투표 시스템</h1>
         {session && (
           <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
         )}
@@ -102,6 +102,7 @@ function VoterScreen() {
             voters={rosterDirectory.voters}
             claimedIds={rosterDirectory.claimedIds}
             loading={rosterDirectory.loading}
+            meetingOpen={Boolean(rosterDirectory.meetingId)}
             onClaimed={saveClaim}
           />
         ) : activePoll && requiresRoster && participation === 'loading' ? (
