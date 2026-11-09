@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useBoardLamps } from '../hooks/useBoardLamps';
 import { usePolls } from '../hooks/usePolls';
-import { getOptions, getPollTotal } from '../lib/poll-utils';
+import { getOptions, getPollDecision, getPollTotal } from '../lib/poll-utils';
 import PollDecisionBadge from './PollDecisionBadge';
 import type { BoardLamp, Poll } from '../types';
 
@@ -46,13 +46,13 @@ export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
 
   return (
     <div className="min-h-screen bg-background text-gray-900 flex flex-col">
-      <header className="bg-primary text-white px-5 py-2.5 flex items-center justify-between gap-4">
-        <h1 className="text-base font-semibold">
+      <header className="bg-primary text-white px-8 py-4 flex items-center justify-between gap-6">
+        <h1 className="text-[clamp(1.5rem,2.2vw,3rem)] font-semibold">
           {view.title}
-          <span className="ml-2 text-sm font-normal text-white/70">{view.caption}</span>
+          <span className="ml-3 text-[clamp(1.15rem,1.6vw,2rem)] font-normal text-white/70">{view.caption}</span>
         </h1>
         {!loading && (view.total > 0 || view.phase !== 'closed') && (
-          <p className="text-sm tabular-nums shrink-0">
+          <p className="text-[clamp(1.5rem,2.2vw,3rem)] tabular-nums shrink-0">
             <span className="text-white/70">투표 </span>
             <span className="font-semibold">{view.voted}</span>
             <span className="text-white/70"> / 전체 </span>
@@ -60,14 +60,14 @@ export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
           </p>
         )}
       </header>
-      <main className={notice ? 'flex-1 grid place-items-center px-6' : 'px-6 py-8'}>
+      <main className={notice || view.phase === 'closed' ? 'flex-1 grid place-items-center overflow-y-auto px-10 py-10' : 'px-10 py-10'}>
         {notice ? (
-          <p className="text-3xl text-gray-500">{notice}</p>
+          <p className="text-center text-[clamp(4.5rem,6vw,8rem)] font-semibold leading-tight text-gray-600">{notice}</p>
         ) : (
-          <div className="mx-auto w-full max-w-5xl space-y-10">
+          <div className="w-[min(92vw,88rem)] space-y-12">
             {published && view.poll && <BoardResult poll={view.poll} large />}
             {view.phase === 'closed' && !published && (
-              <p className="text-center text-2xl text-gray-500">결과는 아직 공개되지 않았습니다.</p>
+              <p className="text-center text-[clamp(4.5rem,6vw,8rem)] font-semibold leading-tight text-gray-600">결과는 아직 공개되지 않았습니다.</p>
             )}
             {view.lamps.length > 0 && <BoardBody view={view} />}
           </div>
@@ -94,13 +94,13 @@ function BoardBody({
 }) {
   return (
     <div>
-      <ul className={`grid gap-3 ${dense ? 'grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] max-h-80 overflow-y-auto' : 'grid-cols-[repeat(auto-fill,minmax(4.75rem,1fr))]'}`}>
+      <ul className={`grid ${dense ? 'max-h-80 grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] gap-3 overflow-y-auto' : 'grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-6'}`}>
         {view.lamps.map((lamp) => {
           const voted = lamp.state === 'voted';
           return (
-            <li key={lamp.badge}>
+            <li key={lamp.badge} className={dense ? undefined : 'flex justify-center'}>
               <div
-                className={`grid size-16 place-items-center rounded-full text-lg font-bold tabular-nums ${voted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}
+                className={`grid place-items-center rounded-full font-bold tabular-nums ${dense ? 'size-16 text-lg' : 'size-[clamp(6.5rem,8vw,9rem)] text-[clamp(1.75rem,2.4vw,3rem)]'} ${voted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}
                 aria-label={`${lamp.badge}번 ${voted ? '투표함' : '미투표'}`}
               >
                 {lamp.badge}
@@ -109,7 +109,7 @@ function BoardBody({
           );
         })}
       </ul>
-      <p className="mt-4 text-sm text-gray-500">
+      <p className={dense ? 'mt-4 text-sm text-gray-500' : 'mt-8 text-center text-2xl text-gray-500'}>
         초록 번호는 투표를 마쳤습니다. 회색 번호는 아직입니다.
       </p>
     </div>
@@ -119,14 +119,14 @@ function BoardBody({
 function BoardResult({ poll, large = false }: { poll: Poll; large?: boolean }) {
   const options = getOptions(poll);
   const total = getPollTotal(poll);
-  const label = large ? 'text-3xl' : 'text-sm';
-  const count = large ? 'text-3xl' : 'text-sm';
-  const bar = large ? 'h-10' : 'h-5';
+  const label = large ? 'text-[clamp(3rem,4.5vw,6rem)]' : 'text-sm';
+  const count = large ? 'text-[clamp(3rem,4.5vw,6rem)]' : 'text-sm';
+  const bar = large ? 'h-[clamp(4rem,6vw,7rem)]' : 'h-5';
 
   return (
-    <section className="space-y-6">
-      <PollDecisionBadge poll={poll} />
-      <div className={large ? 'space-y-6' : 'space-y-3'}>
+    <section className={large ? 'space-y-12' : 'space-y-6'}>
+      {large ? <LargeDecision poll={poll} /> : <PollDecisionBadge poll={poll} />}
+      <div className={large ? 'space-y-10' : 'space-y-3'}>
         {options.map((option) => {
           const votes = poll.results?.[option] ?? 0;
           const percent = total > 0 ? Math.round((votes / total) * 100) : 0;
@@ -153,6 +153,21 @@ function BoardResult({ poll, large = false }: { poll: Poll; large?: boolean }) {
   );
 }
 
+function LargeDecision({ poll }: { poll: Poll }) {
+  if (poll.type !== 'yesno' || (!poll.quorumTarget && poll.passRatio == null)) return null;
+  const result = getPollDecision(poll);
+  if (result.decision === 'quorum-not-met') {
+    return <p className="text-center text-[clamp(3.5rem,6vw,7rem)] font-bold text-yellow-700">정족수 미달</p>;
+  }
+  if (result.decision === 'passed') {
+    return <p className="text-center text-[clamp(4rem,7vw,8rem)] font-bold text-primary">가결</p>;
+  }
+  if (result.decision === 'rejected') {
+    return <p className="text-center text-[clamp(4rem,7vw,8rem)] font-bold text-red-600">부결</p>;
+  }
+  return null;
+}
+
 function barColor(poll: Poll, option: string): string {
   if (poll.type !== 'yesno') return 'bg-primary';
   if (option === '기권') return 'bg-gray-500';
@@ -171,22 +186,34 @@ interface BoardView {
 }
 
 function boardView(polls: Poll[], lamps: BoardLamp[]): BoardView {
-  const live = polls.find((poll) => poll.status === 'active' && poll.eligibilityMode === 'roster');
+  const today = kstDay(Date.now());
+  const todays = polls.filter((poll) => isSameKstDay(poll, today));
+  const live = todays.find((poll) => poll.status === 'active' && poll.eligibilityMode === 'roster');
   if (live) return summarize(live.title, '진행 중', 'live', lamps.filter((lamp) => lamp.pollId === live.id), live);
 
   const linkedId = lamps.find((lamp) => lamp.pollId && lamp.state !== 'seated')?.pollId ?? '';
-  const linked = polls.find((poll) => poll.id === linkedId && poll.eligibilityMode === 'roster');
+  const linked = todays.find((poll) => poll.id === linkedId && poll.eligibilityMode === 'roster');
   if (linked) {
     return summarize(linked.title, '마감', 'closed', lamps.filter((lamp) => lamp.pollId === linked.id), linked);
   }
 
-  const newest = polls[0];
+  const newest = todays[0];
   if (newest?.status === 'closed') {
     return summarize(newest.title, '마감', 'closed', [], newest);
   }
 
   const seated = lamps.filter((lamp) => lamp.state === 'seated');
   return summarize('입장 현황', '투표 시작 전', 'before', seated, null);
+}
+
+function kstDay(timestamp: number): string {
+  return new Date(timestamp + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function isSameKstDay(poll: Poll, today: string): boolean {
+  return [poll.createdAt, poll.startedAt, poll.closedAt].some(
+    (value) => typeof value === 'number' && value > 0 && kstDay(value) === today,
+  );
 }
 
 function summarize(
