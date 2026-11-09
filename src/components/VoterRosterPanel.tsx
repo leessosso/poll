@@ -205,9 +205,10 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
               type="button"
               onClick={beginMeeting}
               disabled={meetingBusy || Boolean(activePoll)}
-              className="text-xs font-semibold text-white bg-primary rounded-lg px-2.5 py-1.5 disabled:opacity-40"
+              className="text-xs font-semibold text-white bg-primary rounded-lg px-2.5 py-1.5 leading-tight text-center disabled:opacity-40"
             >
-              새 모임 시작(입장 초기화)
+              <span className="block">새 모임 시작</span>
+              <span className="block font-normal opacity-90">(입장 초기화)</span>
             </button>
           </div>
         </div>
