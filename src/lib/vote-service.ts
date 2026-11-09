@@ -7,17 +7,15 @@ import {
   increment,
   query,
   runTransaction,
-  setDoc,
   updateDoc,
   where,
   writeBatch,
   type WriteBatch,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { MEETING_PUBLIC_DOC, checkinId, claimedNameId, entryCodeHash, lampId } from './meeting';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
 import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
-
-const MEETING_DOC = doc(db, 'meeting', 'current');
 
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -31,10 +29,6 @@ class BadgeTakenError extends Error {
   }
 }
 
-function hasCheckinOwner(data: Record<string, unknown> | undefined): boolean {
-  return typeof data?.authUid === 'string' && data.authUid.length > 0;
-}
-
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('인증이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.');
@@ -45,8 +39,41 @@ function tallyRef(pollId: string) {
   return doc(db, 'polls', pollId, 'tally', 'current');
 }
 
-function lampRef(badge: number) {
-  return doc(db, 'lamps', String(badge));
+function lampRef(meetingId: string, badge: number) {
+  return doc(db, 'lamps', lampId(meetingId, badge));
+}
+
+function claimedRef(meetingId: string, voterId: string) {
+  return doc(db, 'claimedNames', claimedNameId(meetingId, voterId));
+}
+
+function reissueRef(meetingId: string, voterId: string) {
+  return doc(db, 'reissues', claimedNameId(meetingId, voterId));
+}
+
+async function currentMeetingId(): Promise<string> {
+  const snap = await getDoc(MEETING_PUBLIC_DOC);
+  const id = snap.exists() ? snap.data().meetingId : '';
+  return typeof id === 'string' ? id : '';
+}
+
+async function requireMeetingId(): Promise<string> {
+  const id = await currentMeetingId();
+  if (!id) throw new Error('먼저 관리자 화면에서 새 모임을 시작해 주세요.');
+  return id;
+}
+
+/** 현재 모임에서 이 유권자가 쓰고 있는(회수되지 않은) 입장 문서 */
+async function findLiveCheckin(meetingId: string, voterId: string) {
+  const snap = await getDocs(
+    query(
+      collection(db, 'checkins'),
+      where('meetingId', '==', meetingId),
+      where('voterId', '==', voterId),
+      where('revoked', '==', false),
+    ),
+  );
+  return snap.docs[0] ?? null;
 }
 
 function badgeOf(data: Record<string, unknown> | undefined): number | null {
@@ -170,49 +197,52 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
   const endsAt = now + durationSeconds * 1000;
   const ops: Array<(batch: WriteBatch) => void> = [];
 
+  let meetingId: string | undefined;
   if (poll.eligibilityMode === 'roster') {
-    const [checkinsSnap, lampsSnap] = await Promise.all([
-      getDocs(collection(db, 'checkins')),
-      getDocs(collection(db, 'lamps')),
+    // 현재 모임의 입장만 이번 투표 인원이 된다. 지난 모임 입장은 무시한다.
+    meetingId = await requireMeetingId();
+    const mid = meetingId;
+    const [checkinsSnap, lampsSnap, reissuesSnap] = await Promise.all([
+      getDocs(query(collection(db, 'checkins'), where('meetingId', '==', mid))),
+      getDocs(query(collection(db, 'lamps'), where('meetingId', '==', mid))),
+      getDocs(query(collection(db, 'reissues'), where('meetingId', '==', mid))),
     ]);
-    const used = new Set<number>();
-    lampsSnap.docs.forEach((lampDoc) => {
-      const badge = Number(lampDoc.id);
-      if (Number.isInteger(badge)) used.add(badge);
-    });
-    checkinsSnap.docs.forEach((checkinDoc) => {
-      const badge = badgeOf(checkinDoc.data());
-      if (badge) used.add(badge);
-    });
 
-    const liveBadges = new Set<string>();
+    const seats = new Map<string, { voterName: string; badge: number }>();
+    const names = new Map<string, string>();
     checkinsSnap.docs.forEach((checkinDoc) => {
       const data = checkinDoc.data();
-      // authUid 없는 예전 체크인은 자리 점유가 아니므로 이번 투표 인원에 넣지 않는다.
-      if (!hasCheckinOwner(data)) return;
-      const voterId = typeof data.voterId === 'string' ? data.voterId : checkinDoc.id;
-      let badge = badgeOf(data);
-      if (!badge) {
-        badge = pickBadge(used);
-        used.add(badge);
-        ops.push((batch) => batch.update(checkinDoc.ref, { badge }));
-      }
-      liveBadges.add(String(badge));
-      ops.push((batch) => batch.set(doc(db, 'polls', poll.id, 'participation', checkinDoc.id), {
+      const badge = badgeOf(data);
+      if (typeof data.voterId !== 'string' || !badge) return;
+      names.set(data.voterId, String(data.voterName ?? '이름 없음'));
+      if (data.revoked === false) seats.set(data.voterId, { voterName: String(data.voterName ?? '이름 없음'), badge });
+    });
+    // 다시 연결을 기다리는 사람도 이번 투표 인원에 넣는다. 새 기기로 들어오면 그대로 투표한다.
+    reissuesSnap.docs.forEach((reissueDoc) => {
+      const data = reissueDoc.data();
+      const badge = badgeOf(data);
+      if (typeof data.voterId !== 'string' || !badge || seats.has(data.voterId)) return;
+      seats.set(data.voterId, { voterName: names.get(data.voterId) ?? '이름 없음', badge });
+    });
+
+    const liveLamps = new Set<string>();
+    seats.forEach((seat, voterId) => {
+      liveLamps.add(lampId(mid, seat.badge));
+      ops.push((batch) => batch.set(doc(db, 'polls', poll.id, 'participation', voterId), {
         voterId,
-        voterName: data.voterName ?? '이름 없음',
+        voterName: seat.voterName,
         status: 'pending',
         createdAt: now,
       }));
-      ops.push((batch) => batch.set(lampRef(badge), {
-        badge,
+      ops.push((batch) => batch.set(lampRef(mid, seat.badge), {
+        meetingId: mid,
+        badge: seat.badge,
         state: 'pending',
         pollId: poll.id,
-        voterId,
       }));
     });
     lampsSnap.docs.forEach((lampDoc) => {
-      if (!liveBadges.has(lampDoc.id)) ops.push((batch) => batch.delete(lampDoc.ref));
+      if (!liveLamps.has(lampDoc.id)) ops.push((batch) => batch.delete(lampDoc.ref));
     });
   }
 
@@ -246,6 +276,7 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
     endsAt,
     durationSeconds,
     expectedCount,
+    ...(meetingId ? { meetingId } : {}),
   }));
   await commitOps(ops);
 }
@@ -358,72 +389,75 @@ export async function togglePollResults(poll: Poll): Promise<void> {
   await updateDoc(doc(db, 'polls', poll.id), { showResults: !poll.showResults });
 }
 
-export function generateRoomCode(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
+const CLAIM_REJECTED =
+  '입장하지 못했습니다. 화면의 입장 코드를 다시 확인해 주세요. 이 기기로 이미 다른 이름에 입장했다면 안내자에게 알려 주세요.';
 
-export async function updateRoomCode(roomCode: string): Promise<void> {
-  await setDoc(MEETING_DOC, { roomCode, updatedAt: Date.now() }, { merge: true });
-}
-
+/**
+ * 현장 입장. 입장 코드는 규칙이 해시 문서로 확인한다.
+ * 관리자가 다시 연결(재발급)을 열어 둔 이름이면 같은 번호로 다시 들어온다.
+ */
 export async function claimRosterSeat(voter: Voter, roomCode: string): Promise<RosterClaim> {
+  const meetingId = await requireMeetingId();
+  const code = roomCode.trim();
+  if (!/^[0-9]{4}$/.test(code)) throw new Error('입장 코드 4자리를 입력해 주세요.');
+  const codeHash = await entryCodeHash(meetingId, code);
   const claimToken = crypto.randomUUID();
-  const normalizedCode = roomCode.trim();
-  const used = new Set<number>();
-  const existing = await getDocs(collection(db, 'lamps'));
-  existing.docs.forEach((lampDoc) => {
-    const badge = Number(lampDoc.id);
-    if (Number.isInteger(badge)) used.add(badge);
-  });
+  const uid = requireUid();
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const badge = pickBadge(used);
-    try {
-      await writeRosterClaim(voter, normalizedCode, claimToken, badge);
-      return { voterId: voter.id, voterName: voter.name, claimToken, badge };
-    } catch (err) {
-      if (!(err instanceof BadgeTakenError)) throw err;
-      used.add(badge);
-      lastError = err;
+  const claimedSnap = await getDoc(claimedRef(meetingId, voter.id));
+  try {
+    if (claimedSnap.exists()) {
+      if (claimedSnap.data().reissue !== true) throw new Error('이미 다른 분이 선택한 이름입니다.');
+      const reissueSnap = await getDoc(reissueRef(meetingId, voter.id));
+      const badge = badgeOf(reissueSnap.data());
+      if (!badge) throw new Error('다시 연결 정보를 찾지 못했습니다. 안내자에게 알려 주세요.');
+      await runTransaction(db, async (tx) => {
+        tx.set(doc(db, 'checkins', checkinId(meetingId, uid)), {
+          meetingId, voterId: voter.id, voterName: voter.name, claimedAt: Date.now(),
+          claimToken, authUid: uid, badge, codeHash, revoked: false,
+        });
+        tx.update(claimedRef(meetingId, voter.id), { reissue: false });
+        tx.delete(reissueRef(meetingId, voter.id));
+      });
+      return { meetingId, voterId: voter.id, voterName: voter.name, claimToken, badge };
     }
+
+    const used = new Set<number>();
+    const existing = await getDocs(query(collection(db, 'lamps'), where('meetingId', '==', meetingId)));
+    existing.docs.forEach((lampDoc) => {
+      const badge = badgeOf(lampDoc.data());
+      if (badge) used.add(badge);
+    });
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const badge = pickBadge(used);
+      try {
+        await runTransaction(db, async (tx) => {
+          const [claimSnap, seatSnap] = await Promise.all([
+            tx.get(claimedRef(meetingId, voter.id)),
+            tx.get(lampRef(meetingId, badge)),
+          ]);
+          if (claimSnap.exists()) throw new Error('이미 다른 분이 선택한 이름입니다.');
+          if (seatSnap.exists()) throw new BadgeTakenError();
+          tx.set(doc(db, 'checkins', checkinId(meetingId, uid)), {
+            meetingId, voterId: voter.id, voterName: voter.name, claimedAt: Date.now(),
+            claimToken, authUid: uid, badge, codeHash, revoked: false,
+          });
+          tx.set(claimedRef(meetingId, voter.id), { meetingId, reissue: false });
+          tx.set(lampRef(meetingId, badge), { meetingId, badge, state: 'seated', pollId: '' });
+        });
+        return { meetingId, voterId: voter.id, voterName: voter.name, claimToken, badge };
+      } catch (err) {
+        if (!(err instanceof BadgeTakenError)) throw err;
+        used.add(badge);
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('입장 번호를 정하지 못했습니다.');
+  } catch (err) {
+    throw permissionError(err, CLAIM_REJECTED);
   }
-  throw lastError instanceof Error ? lastError : new Error('입장 번호를 정하지 못했습니다.');
-}
-
-async function writeRosterClaim(voter: Voter, roomCode: string, claimToken: string, badge: number): Promise<void> {
-  const checkinRef = doc(db, 'checkins', voter.id);
-  const seatRef = lampRef(badge);
-
-  await runTransaction(db, async (tx) => {
-    const [meetingSnap, checkinSnap, seatSnap] = await Promise.all([
-      tx.get(MEETING_DOC),
-      tx.get(checkinRef),
-      tx.get(seatRef),
-    ]);
-    const expected = meetingSnap.exists() ? String(meetingSnap.data().roomCode ?? '') : '';
-    if (!expected || expected !== roomCode) throw new Error('입장 코드가 맞지 않습니다.');
-    if (checkinSnap.exists() && hasCheckinOwner(checkinSnap.data())) {
-      throw new Error('이미 다른 분이 선택한 이름입니다.');
-    }
-    if (seatSnap.exists()) throw new BadgeTakenError();
-
-    const authUid = requireUid();
-    tx.set(checkinRef, {
-      voterId: voter.id,
-      voterName: voter.name,
-      claimedAt: Date.now(),
-      claimToken,
-      authUid,
-      badge,
-    });
-    tx.set(seatRef, {
-      badge,
-      state: 'seated',
-      pollId: '',
-      voterId: voter.id,
-    });
-  });
 }
 
 export async function revokeAttendanceSession(sessionId: string): Promise<void> {
@@ -440,75 +474,74 @@ async function deleteAttendanceSessions(voterId: string): Promise<void> {
   await batch.commit();
 }
 
-export async function removeVoterFromRoster(voterId: string, activePoll: Poll | null): Promise<void> {
-  const voterRef = doc(db, 'voters', voterId);
-  const checkinRef = doc(db, 'checkins', voterId);
-  const tracksParticipation =
-    activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
+function tracksParticipation(poll: Poll | null): poll is Poll {
+  return Boolean(poll && (poll.eligibilityMode === 'roster' || poll.eligibilityMode === 'attendance'));
+}
 
-  const directoryRef = doc(db, 'voterDirectory', voterId);
-  const checkinSnap = await getDoc(checkinRef);
-  const badge = badgeOf(checkinSnap.data());
-  const seatRef = badge ? lampRef(badge) : null;
+/**
+ * 입장 해제. 이름을 비워 다시 고를 수 있게 한다.
+ * 입장 문서는 지우지 않고 회수(revoked)만 한다. 이미 투표한 사람은 해제하지 않는다.
+ */
+async function releaseSeat(voterId: string, activePoll: Poll | null, alsoRemoveVoter: boolean): Promise<void> {
+  const meetingId = await currentMeetingId();
+  const live = meetingId ? await findLiveCheckin(meetingId, voterId) : null;
+  const badge = badgeOf(live?.data());
+  const pendingReissue = meetingId ? await getDoc(reissueRef(meetingId, voterId)).catch(() => null) : null;
+  const reissueBadge = badgeOf(pendingReissue?.data());
+  const participantRef = tracksParticipation(activePoll)
+    ? doc(db, 'polls', activePoll.id, 'participation', voterId)
+    : null;
 
-  if (!tracksParticipation) {
-    const batch = writeBatch(db);
-    batch.delete(voterRef);
-    batch.delete(directoryRef);
-    batch.delete(checkinRef);
-    if (seatRef) batch.delete(seatRef);
-    await batch.commit();
-    await deleteAttendanceSessions(voterId);
-    return;
-  }
-
-  const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
   await runTransaction(db, async (tx) => {
-    const [participantSnap, seatSnap] = await Promise.all([
-      tx.get(participantRef),
-      seatRef ? tx.get(seatRef) : Promise.resolve(null),
-    ]);
-    const completed = participantSnap.exists() && participantSnap.data().status === 'completed';
-    tx.delete(voterRef);
-    tx.delete(directoryRef);
-    if (!completed) {
-      if (participantSnap.exists()) tx.delete(participantRef);
-      tx.delete(checkinRef);
-      if (seatSnap?.exists()) tx.delete(seatSnap.ref);
+    const participantSnap = participantRef ? await tx.get(participantRef) : null;
+    const completed = participantSnap?.exists() && participantSnap.data().status === 'completed';
+    if (completed && !alsoRemoveVoter) throw new Error('이미 투표를 완료한 이름은 해제할 수 없습니다.');
+    if (alsoRemoveVoter) {
+      tx.delete(doc(db, 'voters', voterId));
+      tx.delete(doc(db, 'voterDirectory', voterId));
     }
+    if (completed) return;
+    if (participantSnap?.exists()) tx.delete(participantSnap.ref);
+    if (!meetingId) return;
+    if (live) tx.update(live.ref, { revoked: true });
+    tx.delete(claimedRef(meetingId, voterId));
+    if (pendingReissue?.exists()) tx.delete(pendingReissue.ref);
+    const seat = badge ?? reissueBadge;
+    if (seat) tx.delete(lampRef(meetingId, seat));
   });
+}
+
+export async function removeVoterFromRoster(voterId: string, activePoll: Poll | null): Promise<void> {
+  await releaseSeat(voterId, activePoll, true);
   await deleteAttendanceSessions(voterId);
 }
 
 export async function releaseRosterClaim(voterId: string, activePoll: Poll | null): Promise<void> {
-  const checkinRef = doc(db, 'checkins', voterId);
-  const tracksParticipation =
-    activePoll && (activePoll.eligibilityMode === 'roster' || activePoll.eligibilityMode === 'attendance');
+  await releaseSeat(voterId, activePoll, false);
+}
 
-  const checkinSnap = await getDoc(checkinRef);
-  const badge = badgeOf(checkinSnap.data());
-  const seatRef = badge ? lampRef(badge) : null;
+/**
+ * 다시 연결(재발급). 휴대폰이 꺼졌거나 바뀐 사람이 새 기기로 같은 이름·번호를 다시 받게 한다.
+ * 이번 투표 참여 기록(아직 투표 전)은 그대로 둔다. 이미 투표한 사람은 하지 않는다.
+ */
+export async function reissueRosterClaim(voterId: string, activePoll: Poll | null): Promise<void> {
+  const meetingId = await requireMeetingId();
+  const live = await findLiveCheckin(meetingId, voterId);
+  if (!live) throw new Error('이 이름은 지금 입장해 있지 않습니다.');
+  const badge = badgeOf(live.data());
+  if (!badge) throw new Error('입장 번호가 없어 다시 연결할 수 없습니다. 입장 해제 후 다시 입장해 주세요.');
+  const participantRef = tracksParticipation(activePoll)
+    ? doc(db, 'polls', activePoll.id, 'participation', voterId)
+    : null;
 
-  if (!tracksParticipation) {
-    const batch = writeBatch(db);
-    batch.delete(checkinRef);
-    if (seatRef) batch.delete(seatRef);
-    await batch.commit();
-    return;
-  }
-
-  const participantRef = doc(db, 'polls', activePoll.id, 'participation', voterId);
   await runTransaction(db, async (tx) => {
-    const [participantSnap, seatSnap] = await Promise.all([
-      tx.get(participantRef),
-      seatRef ? tx.get(seatRef) : Promise.resolve(null),
-    ]);
-    if (participantSnap.exists() && participantSnap.data().status === 'completed') {
-      throw new Error('이미 투표를 완료한 이름은 해제할 수 없습니다.');
+    const participantSnap = participantRef ? await tx.get(participantRef) : null;
+    if (participantSnap?.exists() && participantSnap.data().status === 'completed') {
+      throw new Error('이미 이번 투표를 마친 분은 다시 연결할 수 없습니다. 투표가 끝난 뒤 다시 해 주세요.');
     }
-    if (participantSnap.exists()) tx.delete(participantRef);
-    tx.delete(checkinRef);
-    if (seatSnap?.exists()) tx.delete(seatSnap.ref);
+    tx.update(live.ref, { revoked: true });
+    tx.update(claimedRef(meetingId, voterId), { reissue: true });
+    tx.set(reissueRef(meetingId, voterId), { meetingId, voterId, badge, createdAt: Date.now() });
   });
 }
 
@@ -517,7 +550,7 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
   const now = Date.now();
   const uid = requireUid();
   const pollRef = doc(db, 'polls', poll.id);
-  const checkinRef = doc(db, 'checkins', claim.voterId);
+  const checkinRef = doc(db, 'checkins', checkinId(claim.meetingId, uid));
   const participantRef = doc(db, 'polls', poll.id, 'participation', claim.voterId);
 
   try {
@@ -528,33 +561,30 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
       tx.get(participantRef),
     ]);
 
-    if (!checkinSnap.exists() || checkinSnap.data().claimToken !== claim.claimToken) {
+    const checkin = checkinSnap.exists() ? checkinSnap.data() : null;
+    if (!checkin || checkin.claimToken !== claim.claimToken || checkin.revoked !== false) {
       throw new Error('입장 정보가 없습니다. 다시 이름을 선택해 주세요.');
     }
     if (!pollSnap.exists()) throw new Error('투표를 찾을 수 없습니다.');
 
     const currentPoll = { id: pollSnap.id, ...pollSnap.data() } as Poll;
     if (currentPoll.status !== 'active') throw new Error('진행 중인 투표가 아닙니다.');
+    if (currentPoll.meetingId !== claim.meetingId) throw new Error('이번 모임에 입장한 이름이 아닙니다.');
     if (currentPoll.endsAt && now >= currentPoll.endsAt) throw new Error('투표 시간이 종료되었습니다.');
     if (!getOptions(currentPoll).includes(choice)) throw new Error('선택할 수 없는 항목입니다.');
     if (!participantSnap.exists()) throw new Error('이번 투표 명단에 없습니다.');
     if (participantSnap.data().status === 'completed') throw new Error('이미 투표를 완료했습니다.');
 
-    const badge = badgeOf(checkinSnap.data());
-    const seatSnap = badge ? await tx.get(lampRef(badge)) : null;
-    if (badge && seatSnap?.exists()) {
-      const seat = seatSnap.data();
-      const ownsSeat = seat.voterId === claim.voterId && seat.pollId === poll.id;
-      if (!ownsSeat || seat.state !== 'pending') {
-        throw new Error('현황판 번호를 확인하지 못했습니다. 다시 입장해 주세요.');
-      }
-    }
+    const badge = badgeOf(checkin);
+    const seatRef = badge ? lampRef(claim.meetingId, badge) : null;
+    const seatSnap = seatRef ? await tx.get(seatRef) : null;
+    const lightSeat = Boolean(seatSnap?.exists() && seatSnap.data().pollId === poll.id && seatSnap.data().state === 'pending');
 
     tx.update(participantRef, { status: 'completed', completedAt: now });
     tx.update(pollRef, { castCount: increment(1) });
     tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { voterId: claim.voterId });
-    if (badge && seatSnap?.exists()) tx.update(lampRef(badge), { state: 'voted' });
+    if (seatRef && lightSeat) tx.update(seatRef, { state: 'voted' });
   });
   } catch (err) {
     throw permissionError(err, '투표를 저장하지 못했습니다. 이미 참여했거나 입장이 해제됐을 수 있습니다.');

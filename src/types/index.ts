@@ -20,6 +20,8 @@ export interface Poll {
   eligibilityMode: EligibilityMode;
   allowAbstain: boolean;
   eventId?: string;
+  /** 명단 투표를 시작할 때 고정한 모임. 이 모임의 입장만 투표한다. */
+  meetingId?: string;
   durationSeconds?: number;
   startedAt?: number;
   endsAt?: number;
@@ -65,6 +67,8 @@ export interface VoterSession {
 
 /** 현장 명단에서 이름을 잡은 브라우저. 선택값은 포함하지 않는다. */
 export interface RosterClaim {
+  /** 입장한 모임. 새 모임이 열리면 이 입장은 더 쓰이지 않는다. */
+  meetingId: string;
   voterId: string;
   voterName: string;
   claimToken: string;

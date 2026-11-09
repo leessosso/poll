@@ -4,9 +4,10 @@ import { db } from '../lib/firebase';
 import { mapPoll } from '../lib/mappers';
 import type { Poll } from '../types';
 
+// 비밀투표: 진행 중에는 관리자도 선택지별 집계를 받지 않는다. 규칙도 같은 조건으로 막는다.
 function tallyVisible(poll: Poll, audience: 'admin' | 'voter'): boolean {
-  if (audience === 'admin') return true;
-  return poll.status === 'closed' && poll.showResults;
+  if (poll.status !== 'closed') return false;
+  return audience === 'admin' || poll.showResults;
 }
 
 export function usePolls(audience: 'admin' | 'voter'): { polls: Poll[]; loading: boolean } {

@@ -3,13 +3,13 @@ import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useMeetingCode } from '../hooks/useMeetingCode';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
+import { rotateRoomCode, startNewMeeting } from '../lib/meeting';
 import {
   createAttendanceSession,
-  generateRoomCode,
+  reissueRosterClaim,
   releaseRosterClaim,
   removeVoterFromRoster,
   revokeAttendanceSession,
-  updateRoomCode,
 } from '../lib/vote-service';
 import type { AttendanceSession, Poll, Voter } from '../types';
 
@@ -19,8 +19,10 @@ interface VoterRosterPanelProps {
 }
 
 export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPanelProps) {
-  const { voters, claimedIds, badgeByVoterId } = useRosterDirectory('admin');
-  const { roomCode, loading: codeLoading } = useMeetingCode();
+  const { voters, claimedIds, reissueIds, badgeByVoterId } = useRosterDirectory('admin');
+  const { roomCode, meetingId, loading: codeLoading } = useMeetingCode();
+  const [meetingBusy, setMeetingBusy] = useState(false);
+  const [reissuingId, setReissuingId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [namesText, setNamesText] = useState('');
   const [adding, setAdding] = useState(false);
@@ -108,10 +110,50 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
 
   const changeRoomCode = async () => {
     setNotice(null);
+    setMeetingBusy(true);
     try {
-      await updateRoomCode(generateRoomCode());
+      await rotateRoomCode(meetingId);
     } catch (err) {
       setNotice({ text: err instanceof Error ? err.message : '입장 코드를 바꾸지 못했습니다.', tone: 'error' });
+    } finally {
+      setMeetingBusy(false);
+    }
+  };
+
+  const beginMeeting = async () => {
+    if (activePoll) {
+      setNotice({ text: '진행 중인 투표를 마감한 뒤 새 모임을 시작해 주세요.', tone: 'error' });
+      return;
+    }
+    if (
+      meetingId &&
+      !confirm('새 모임을 시작할까요?\n지금까지의 입장과 현황판 번호는 모두 비워지고, 모두 새 입장 코드로 다시 입장해야 합니다.\n(지난 기록은 지우지 않고 보관됩니다.)')
+    ) {
+      return;
+    }
+    setNotice(null);
+    setMeetingBusy(true);
+    try {
+      await startNewMeeting();
+      setNotice({ text: '새 모임을 시작했습니다. 새 입장 코드를 화면에 띄워 주세요.', tone: 'ok' });
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '새 모임을 시작하지 못했습니다.', tone: 'error' });
+    } finally {
+      setMeetingBusy(false);
+    }
+  };
+
+  const reissueClaim = async (voter: Voter) => {
+    if (!confirm(`"${voter.name}" 님을 새 기기로 다시 연결할까요?\n지금 기기의 입장은 풀리고, 새 기기에서 같은 이름을 고르면 같은 번호로 들어옵니다.`)) return;
+    setReissuingId(voter.id);
+    setNotice(null);
+    try {
+      await reissueRosterClaim(voter.id, activePoll);
+      setNotice({ text: `${voter.name} 님은 이제 새 기기에서 입장 코드와 이름을 다시 고르면 됩니다.`, tone: 'ok' });
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : '다시 연결하지 못했습니다.', tone: 'error' });
+    } finally {
+      setReissuingId(null);
     }
   };
 
@@ -146,16 +188,28 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
         <div>
           <h2 className="font-bold text-gray-800">현장 입장</h2>
           <p className="text-sm text-gray-400 mt-1">
-            이 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다.
+            이 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다. 모임마다 '새 모임 시작'으로 입장을 비우고 시작하세요.
           </p>
         </div>
         <div className="text-right">
           <p className="text-3xl font-bold tracking-widest text-primary">
-            {codeLoading ? '----' : roomCode || '없음'}
+            {codeLoading ? '----' : meetingId && roomCode ? roomCode : '없음'}
           </p>
-          <button type="button" onClick={changeRoomCode} className="text-xs text-primary mt-1">
-            {roomCode ? '코드 바꾸기' : '코드 만들기'}
-          </button>
+          <div className="flex flex-col items-end gap-1 mt-1">
+            {meetingId && roomCode && (
+              <button type="button" onClick={changeRoomCode} disabled={meetingBusy} className="text-xs text-primary disabled:opacity-40">
+                코드 바꾸기
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={beginMeeting}
+              disabled={meetingBusy || Boolean(activePoll)}
+              className="text-xs font-semibold text-white bg-primary rounded-lg px-2.5 py-1.5 disabled:opacity-40"
+            >
+              새 모임 시작(입장 초기화)
+            </button>
+          </div>
         </div>
       </div>
       {notice && (
@@ -207,12 +261,28 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs ${claimedIds.has(voter.id) ? 'text-green-600' : 'text-gray-400'}`}>
+                <span
+                  className={`text-xs ${
+                    claimedIds.has(voter.id) ? 'text-green-600' : reissueIds.has(voter.id) ? 'text-accent' : 'text-gray-400'
+                  }`}
+                >
                   {claimedIds.has(voter.id)
                     ? `입장함${badgeByVoterId.get(voter.id) ? ` · ${badgeByVoterId.get(voter.id)}번` : ''}`
-                    : '미입장'}
+                    : reissueIds.has(voter.id)
+                      ? '새 기기 연결 대기'
+                      : '미입장'}
                 </span>
                 {claimedIds.has(voter.id) && (
+                  <button
+                    type="button"
+                    onClick={() => reissueClaim(voter)}
+                    disabled={reissuingId === voter.id}
+                    className="text-xs text-primary disabled:opacity-40"
+                  >
+                    {reissuingId === voter.id ? '처리 중' : '다시 연결(재발급)'}
+                  </button>
+                )}
+                {(claimedIds.has(voter.id) || reissueIds.has(voter.id)) && (
                   <button
                     type="button"
                     onClick={() => releaseClaim(voter)}

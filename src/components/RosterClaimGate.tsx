@@ -6,10 +6,12 @@ interface RosterClaimGateProps {
   voters: Voter[];
   claimedIds: Set<string>;
   loading: boolean;
+  /** 관리자가 새 모임을 시작해 입장이 열려 있는지 */
+  meetingOpen: boolean;
   onClaimed: (claim: RosterClaim) => void;
 }
 
-export default function RosterClaimGate({ voters, claimedIds, loading, onClaimed }: RosterClaimGateProps) {
+export default function RosterClaimGate({ voters, claimedIds, loading, meetingOpen, onClaimed }: RosterClaimGateProps) {
   const [roomCode, setRoomCode] = useState('');
   const [query, setQuery] = useState('');
   const [voterId, setVoterId] = useState('');
@@ -42,6 +44,15 @@ export default function RosterClaimGate({ voters, claimedIds, loading, onClaimed
       setSubmitting(false);
     }
   };
+
+  if (!loading && !meetingOpen) {
+    return (
+      <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
+        <p className="text-gray-800 font-semibold mb-2">아직 입장이 열리지 않았습니다</p>
+        <p className="text-gray-500">안내자가 입장 코드를 띄우면 이 화면에서 입장할 수 있습니다.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-surface rounded-2xl p-6 shadow-sm border border-border">

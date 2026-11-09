@@ -9,7 +9,17 @@ rules_version = '2';
 // 선택값과 유권자 id는 어떤 문서에도 함께 두지 않는다.
 // 선택지별 집계의 공개 여부는 polls/{id}/tally/current 가 결정한다.
 // 예전 polls.results 필드는 지우지 않아도 투표 문서 읽기가 된다. 새 쓰기로 그 맵을 바꾸지는 못한다.
-// authUid 가 없는 예전 checkins 는 읽을 수 있고, 새 입장으로 덮어쓸 수 있다.
+// 진행 중 집계는 관리자도 읽지 못한다. 마감 뒤에만 관리자가, 공개 뒤에만 투표자가 읽는다.
+//
+// 현장 입장은 모임(meetingId) 단위다.
+// - meeting/current: 관리자만 읽는다. 입장 코드 원문과 현재 모임 id.
+// - meetingPublic/current: 현재 모임 id 만 공개한다.
+// - entryCodes/{sha256(meetingId:code)}: 아무도 읽지 못한다. 입장 때 규칙이 존재를 확인한다.
+// - checkins/{meetingId}_{authUid}: 관리자와 본인만 읽는다. 이름·번호·uid 연결은 여기에만 있다.
+// - claimedNames/{meetingId}_{voterId}: 이름이 이미 선택됐는지만 공개한다. uid·번호는 없다.
+// - reissues/{meetingId}_{voterId}: 관리자가 다시 연결을 열어 둔 번호. 새 기기가 같은 번호로 들어온다.
+// - lamps/{meetingId}_{badge}: 현황판. 번호와 상태만 있고 이름·유권자 id는 없다.
+// 새 모임을 시작하면 meetingId 가 바뀌고, 예전 입장 문서는 지우지 않고 무시된다.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -37,6 +47,30 @@ service cloud.firestore {
 
     function isVoter() {
       return signedIn() && !isAdmin();
+    }
+
+    function checkinPath(meetingId, uid) {
+      return /databases/$(database)/documents/checkins/$(meetingId + '_' + uid);
+    }
+
+    function claimedPath(meetingId, voterId) {
+      return /databases/$(database)/documents/claimedNames/$(meetingId + '_' + voterId);
+    }
+
+    function reissuePath(meetingId, voterId) {
+      return /databases/$(database)/documents/reissues/$(meetingId + '_' + voterId);
+    }
+
+    function lampPath(meetingId, badge) {
+      return /databases/$(database)/documents/lamps/$(meetingId + '_' + string(badge));
+    }
+
+    function currentMeetingId() {
+      return get(/databases/$(database)/documents/meetingPublic/current).data.meetingId;
+    }
+
+    function validMeetingId(value) {
+      return value is string && value.matches('^mtg_[0-9a-fA-F-]{36}$');
     }
 
     function pollPath(pollId) {
@@ -98,7 +132,7 @@ service cloud.firestore {
         'title', 'type', 'options', 'status', 'createdAt', 'showResults',
         'eligibilityMode', 'allowAbstain', 'eventId', 'durationSeconds',
         'startedAt', 'endsAt', 'closedAt', 'quorumTarget', 'passRatio', 'castCount',
-        'expectedCount', 'results'
+        'expectedCount', 'results', 'meetingId'
       ]);
     }
 
@@ -142,6 +176,7 @@ service cloud.firestore {
         && data.castCount >= 0
         && expectedCountOk(data)
         && (!data.keys().hasAny(['eventId']) || data.eventId is string)
+        && (!data.keys().hasAny(['meetingId']) || data.meetingId is string)
         && optionalNumber(data, 'durationSeconds')
         && optionalNumber(data, 'startedAt')
         && optionalNumber(data, 'endsAt')
@@ -199,14 +234,18 @@ service cloud.firestore {
         && optionalNumber(data, 'completedAt');
     }
 
-    function rosterPartOk(pollId, guard) {
+    // 명단 투표는 투표 시작 때 고정한 모임(poll.meetingId)의 본인 입장만 인정한다.
+    // 다시 연결로 회수된(revoked) 입장은 투표하지 못한다.
+    function rosterPartOk(pollId, guard, poll) {
       let voterId = guard.voterId;
-      let checkin = get(/databases/$(database)/documents/checkins/$(voterId)).data;
+      let checkin = get(checkinPath(poll.get('meetingId', ''), request.auth.uid)).data;
       let beforePart = get(partPath(pollId, voterId)).data;
       let afterPart = getAfter(partPath(pollId, voterId)).data;
       return guard.keys().hasOnly(['voterId'])
         && guard.voterId is string
         && checkin.authUid == request.auth.uid
+        && checkin.voterId == voterId
+        && checkin.revoked == false
         && beforePart.status == 'pending'
         && afterPart.status == 'completed'
         && afterPart.voterId == voterId
@@ -262,7 +301,7 @@ service cloud.firestore {
             && guard.keys().hasOnly(['createdAt'])
             && nearNow(guard.createdAt)
           )
-          || (pollBefore.eligibilityMode == 'roster' && rosterPartOk(pollId, guard))
+          || (pollBefore.eligibilityMode == 'roster' && rosterPartOk(pollId, guard, pollBefore))
           || (pollBefore.eligibilityMode == 'attendance' && attendancePartOk(pollId, guard))
         );
     }
@@ -274,10 +313,11 @@ service cloud.firestore {
         || poll.castCount < poll.expectedCount;
     }
 
+    // 비밀투표: 진행 중에는 관리자도 선택지별 집계를 읽지 못한다.
     function canReadTally(pollId) {
       let poll = get(pollPath(pollId)).data;
-      return isAdmin()
-        || (poll.status == 'closed' && poll.showResults == true);
+      return poll.status == 'closed'
+        && (isAdmin() || poll.showResults == true);
     }
 
     match /polls/{pollId} {
@@ -316,7 +356,8 @@ service cloud.firestore {
       }
 
       match /participation/{voterId} {
-        allow get: if signedIn() && participantShape(resource.data);
+        // 없는 문서도 '명단에 없음'으로 보여 줄 수 있게 get 을 허용한다.
+        allow get: if signedIn() && (resource == null || participantShape(resource.data));
         allow list: if isAdmin();
         allow create: if isAdmin()
             && request.resource.data.keys().hasOnly(['voterId', 'voterName', 'status', 'createdAt'])
@@ -363,122 +404,201 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    function ownedCheckin(fields) {
-      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid', 'badge'])
-        && fields.voterId is string
-        && fields.voterName is string
-        && fields.voterName.size() > 0
-        && fields.voterName.size() <= 40
-        && fields.claimedAt is number
-        && fields.claimToken is string
-        && fields.claimToken.size() >= 32
-        && fields.claimToken.size() <= 40
-        && fields.authUid is string
-        && fields.authUid.size() > 0
-        && fields.authUid.size() <= 128
-        && (!fields.keys().hasAny(['badge']) || (fields.badge is int && fields.badge >= 100 && fields.badge <= 999));
+    function badgeOk(value) {
+      return value is int && value >= 100 && value <= 999;
     }
 
-    // 이 변경 전 체크인에는 authUid 가 없다. 목록 쿼리가 깨지지 않게 읽기는 허용하고,
-    // 그 문서는 새 입장으로 덮어쓸 수 있다. authUid 가 있는 문서는 덮어쓰지 못한다.
-    function legacyCheckin(fields) {
-      return fields.keys().hasOnly(['voterId', 'voterName', 'claimedAt', 'claimToken'])
-        && fields.keys().hasAll(['voterId', 'voterName', 'claimedAt'])
-        && fields.voterId is string
-        && fields.voterName is string
-        && fields.claimedAt is number
-        && (!fields.keys().hasAny(['claimToken']) || fields.claimToken is string);
+    function checkinShape(d) {
+      return d.keys().hasOnly([
+          'meetingId', 'voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid', 'badge', 'codeHash', 'revoked'
+        ])
+        && d.keys().hasAll([
+          'meetingId', 'voterId', 'voterName', 'claimedAt', 'claimToken', 'authUid', 'badge', 'codeHash', 'revoked'
+        ])
+        && validMeetingId(d.meetingId)
+        && d.voterId is string
+        && d.voterId.size() > 0
+        && d.voterId.size() <= 128
+        && d.voterName is string
+        && d.voterName.size() > 0
+        && d.voterName.size() <= 40
+        && d.claimedAt is number
+        && d.claimToken is string
+        && d.claimToken.size() >= 32
+        && d.claimToken.size() <= 40
+        && d.authUid is string
+        && d.authUid.size() > 0
+        && d.authUid.size() <= 128
+        && badgeOk(d.badge)
+        && d.codeHash is string
+        && d.codeHash.matches('^[0-9a-f]{64}$')
+        && d.revoked is bool;
     }
 
-    function checkinMatchesVoter(id) {
-      return exists(/databases/$(database)/documents/voters/$(id))
-        && get(/databases/$(database)/documents/voters/$(id)).data.name == request.resource.data.voterName
-        && get(/databases/$(database)/documents/voters/$(id)).data.active == true;
+    function checkinMatchesVoter(d) {
+      let v = get(/databases/$(database)/documents/voters/$(d.voterId)).data;
+      return v.name == d.voterName && v.active == true;
     }
 
-    match /checkins/{voterId} {
-      // 목록 규칙은 문서 필드 조건이 쿼리와 맞지 않으면 통째로 거부된다.
-      // authUid 유무가 다른 예전 문서가 있어도 명단 조회가 되도록 읽기는 인증만 본다.
-      // 선택값은 이 컬렉션 쓰기에 넣을 수 없고, 투표는 authUid 가 본인일 때만 된다.
-      allow read: if signedIn();
-      allow create: if isVoter()
-        && !exists(/databases/$(database)/documents/checkins/$(voterId))
-        && ownedCheckin(request.resource.data)
-        && request.resource.data.voterId == voterId
-        && request.resource.data.authUid == request.auth.uid
-        && nearNow(request.resource.data.claimedAt)
-        && checkinMatchesVoter(voterId);
-      allow update: if resource != null
-        && isVoter()
-        && legacyCheckin(resource.data)
-        && ownedCheckin(request.resource.data)
-        && request.resource.data.voterId == voterId
-        && request.resource.data.authUid == request.auth.uid
-        && nearNow(request.resource.data.claimedAt)
-        && checkinMatchesVoter(voterId)
+    // 처음 입장: 이름과 번호가 모두 비어 있어야 하고, 같은 쓰기에서 둘 다 잡는다.
+    function firstClaimOk(d) {
+      return !exists(claimedPath(d.meetingId, d.voterId))
+        && getAfter(claimedPath(d.meetingId, d.voterId)).data.reissue == false
+        && !exists(lampPath(d.meetingId, d.badge))
+        && existsAfter(lampPath(d.meetingId, d.badge));
+    }
+
+    // 다시 연결: 관리자가 열어 둔 이름만, 관리자가 정한 번호 그대로 받는다.
+    function reclaimOk(d) {
+      return get(claimedPath(d.meetingId, d.voterId)).data.reissue == true
+        && getAfter(claimedPath(d.meetingId, d.voterId)).data.reissue == false
+        && get(reissuePath(d.meetingId, d.voterId)).data.badge == d.badge
+        && !existsAfter(reissuePath(d.meetingId, d.voterId));
+    }
+
+    // 입장 코드는 원문을 읽지 않고 sha256(meetingId:code) 이름의 문서가 있는지로만 확인한다.
+    function voterClaimOk(checkinId) {
+      let d = request.resource.data;
+      return isVoter()
+        && checkinShape(d)
+        && checkinId == d.meetingId + '_' + request.auth.uid
+        && d.authUid == request.auth.uid
+        && d.revoked == false
+        && nearNow(d.claimedAt)
+        && d.meetingId == currentMeetingId()
+        && get(/databases/$(database)/documents/entryCodes/$(d.codeHash)).data.meetingId == d.meetingId
+        && checkinMatchesVoter(d)
+        && (firstClaimOk(d) || reclaimOk(d));
+    }
+
+    // 관리자와 본인만 읽는다. 본인은 같은 기기에서 다시 열 때 자기 입장을 찾는다.
+    match /checkins/{checkinId} {
+      allow get: if isAdmin()
+        || signedIn() && (resource == null || resource.data.get('authUid', '') == request.auth.uid);
+      allow list: if isAdmin()
+        || signedIn() && resource.data.authUid == request.auth.uid;
+      allow create: if voterClaimOk(checkinId);
+      // 본인 입장이 다시 연결로 회수된 뒤 같은 기기로 다시 받는 경우.
+      allow update: if resource.data.get('revoked', false) == true
+          && resource.data.get('authUid', '') == request.auth.uid
+          && voterClaimOk(checkinId)
         || isAdmin()
-        && resource.data.authUid is string
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['badge'])
-        && request.resource.data.badge is int
-        && request.resource.data.badge >= 100
-        && request.resource.data.badge <= 999;
+          && resource.data.get('revoked', true) == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked'])
+          && request.resource.data.revoked == true;
       allow delete: if isAdmin();
     }
 
-    function lampShape(data) {
-      return data.keys().hasOnly(['badge', 'state', 'pollId', 'voterId'])
-        && data.badge is int
-        && data.badge >= 100
-        && data.badge <= 999
-        && data.state in ['seated', 'pending', 'voted']
-        && data.pollId is string
-        && data.pollId.size() <= 80
-        && data.voterId is string
-        && data.voterId.size() > 0
-        && data.voterId.size() <= 128;
+    // 이름 선점 여부만 공개한다. 문서에는 모임 id 와 재연결 대기 여부만 있다.
+    match /claimedNames/{claimId} {
+      allow read: if signedIn();
+      allow create: if isVoter()
+        && request.resource.data.keys().hasOnly(['meetingId', 'reissue'])
+        && validMeetingId(request.resource.data.meetingId)
+        && request.resource.data.reissue == false
+        && claimId == request.resource.data.meetingId + '_'
+          + getAfter(checkinPath(request.resource.data.meetingId, request.auth.uid)).data.voterId
+        && getAfter(checkinPath(request.resource.data.meetingId, request.auth.uid)).data.revoked == false;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reissue'])
+        && (
+          isAdmin() && resource.data.reissue == false && request.resource.data.reissue == true
+          || isVoter()
+            && resource.data.reissue == true
+            && request.resource.data.reissue == false
+            && claimId == resource.data.meetingId + '_'
+              + getAfter(checkinPath(resource.data.meetingId, request.auth.uid)).data.voterId
+            && getAfter(checkinPath(resource.data.meetingId, request.auth.uid)).data.revoked == false
+        );
+      allow delete: if isAdmin();
     }
 
-    // 현황판은 번호와 투표 여부만 목록으로 읽는다. 이름은 이 문서에 없다.
-    // voterId 는 번호 소유를 규칙에서 확인하는 용도다.
-    match /lamps/{badgeId} {
+    // 다시 연결 대기 중인 번호. 새 기기는 이 번호를 읽어 같은 번호로 입장한다.
+    match /reissues/{claimId} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['meetingId', 'voterId', 'badge', 'createdAt'])
+        && validMeetingId(request.resource.data.meetingId)
+        && request.resource.data.voterId is string
+        && claimId == request.resource.data.meetingId + '_' + request.resource.data.voterId
+        && badgeOk(request.resource.data.badge)
+        && request.resource.data.createdAt is number;
+      allow delete: if isAdmin()
+        || isVoter()
+          && getAfter(checkinPath(resource.data.meetingId, request.auth.uid)).data.voterId == resource.data.voterId
+          && getAfter(checkinPath(resource.data.meetingId, request.auth.uid)).data.revoked == false
+          && getAfter(claimedPath(resource.data.meetingId, resource.data.voterId)).data.reissue == false;
+    }
+
+    function lampShape(data, lampId) {
+      return data.keys().hasOnly(['meetingId', 'badge', 'state', 'pollId'])
+        && validMeetingId(data.meetingId)
+        && badgeOk(data.badge)
+        && lampId == data.meetingId + '_' + string(data.badge)
+        && data.state in ['seated', 'pending', 'voted']
+        && data.pollId is string
+        && data.pollId.size() <= 80;
+    }
+
+    // 현황판은 번호와 투표 여부만 읽는다. 이름도 유권자 id 도 이 문서에 없다.
+    // 번호 소유는 본인 checkins 문서(관리자·본인만 읽음)로 확인한다.
+    match /lamps/{lampId} {
       allow read: if signedIn();
-      allow create: if lampShape(request.resource.data)
-        && request.resource.data.badge == int(badgeId)
+      allow create: if lampShape(request.resource.data, lampId)
         && (
           isAdmin()
-          || (
-            isVoter()
+          || isVoter()
             && request.resource.data.state == 'seated'
             && request.resource.data.pollId == ''
-            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.badge == int(badgeId)
-            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.authUid == request.auth.uid
-            && getAfter(/databases/$(database)/documents/checkins/$(request.resource.data.voterId)).data.voterId == request.resource.data.voterId
-          )
+            && getAfter(checkinPath(request.resource.data.meetingId, request.auth.uid)).data.badge == request.resource.data.badge
+            && getAfter(checkinPath(request.resource.data.meetingId, request.auth.uid)).data.revoked == false
         );
       allow update: if isAdmin()
-          && lampShape(request.resource.data)
-          && request.resource.data.badge == int(badgeId)
-          && request.resource.data.voterId == resource.data.voterId
+          && lampShape(request.resource.data, lampId)
+          && request.resource.data.badge == resource.data.badge
+          && request.resource.data.meetingId == resource.data.meetingId
         || isVoter()
           && resource.data.state == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
           && request.resource.data.state == 'voted'
-          && get(/databases/$(database)/documents/checkins/$(resource.data.voterId)).data.authUid == request.auth.uid
-          && get(/databases/$(database)/documents/checkins/$(resource.data.voterId)).data.badge == int(badgeId)
-          && getAfter(partPath(resource.data.pollId, resource.data.voterId)).data.status == 'completed'
-          && getAfter(partPath(resource.data.pollId, resource.data.voterId)).data.voterId == resource.data.voterId;
+          && get(checkinPath(resource.data.meetingId, request.auth.uid)).data.badge == resource.data.badge
+          && get(checkinPath(resource.data.meetingId, request.auth.uid)).data.revoked == false
+          && getAfter(partPath(resource.data.pollId, get(checkinPath(resource.data.meetingId, request.auth.uid)).data.voterId)).data.status == 'completed';
       allow delete: if isAdmin();
     }
 
+    // 입장 코드 원문. 관리자만 읽는다.
     match /meeting/{docId} {
+      allow read: if isAdmin() && docId == 'current';
+      allow create, update: if isAdmin()
+        && docId == 'current'
+        && request.resource.data.keys().hasOnly(['roomCode', 'meetingId', 'updatedAt'])
+        && request.resource.data.roomCode is string
+        && request.resource.data.roomCode.matches('^[0-9]{4}$')
+        && validMeetingId(request.resource.data.meetingId)
+        && request.resource.data.updatedAt is number;
+      allow delete: if false;
+    }
+
+    match /meetingPublic/{docId} {
       allow read: if signedIn() && docId == 'current';
       allow create, update: if isAdmin()
         && docId == 'current'
-        && request.resource.data.keys().hasOnly(['roomCode', 'updatedAt'])
-        && request.resource.data.roomCode is string
-        && request.resource.data.roomCode.matches('^[0-9]{4}$')
+        && request.resource.data.keys().hasOnly(['meetingId', 'updatedAt'])
+        && validMeetingId(request.resource.data.meetingId)
         && request.resource.data.updatedAt is number;
       allow delete: if false;
+    }
+
+    match /entryCodes/{codeHash} {
+      allow read: if false;
+      allow create: if isAdmin()
+        && codeHash.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['meetingId', 'createdAt'])
+        && validMeetingId(request.resource.data.meetingId)
+        && request.resource.data.createdAt is number;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     function validSession(data) {

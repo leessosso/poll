@@ -24,6 +24,7 @@ export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
     eligibilityMode: data.eligibilityMode ?? 'open',
     allowAbstain,
     eventId: data.eventId,
+    meetingId: typeof data.meetingId === 'string' ? data.meetingId : undefined,
     durationSeconds: data.durationSeconds,
     startedAt: data.startedAt,
     endsAt: data.endsAt,
