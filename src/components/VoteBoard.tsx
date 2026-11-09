@@ -1,4 +1,6 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { TILE_GAP_RATIO, fitTiles } from '../lib/board-fit';
 import { useBoardLamps } from '../hooks/useBoardLamps';
 import { usePolls } from '../hooks/usePolls';
 import { getOptions, getPollDecision, getPollTotal } from '../lib/poll-utils';
@@ -45,7 +47,7 @@ export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-gray-900 flex flex-col">
+    <div className={`${notice || published ? 'min-h-screen' : 'h-screen overflow-hidden'} bg-background text-gray-900 flex flex-col`}>
       <header className="bg-primary text-white px-8 py-4 flex items-center justify-between gap-6">
         <h1 className="text-[clamp(1.5rem,2.2vw,3rem)] font-semibold">
           {view.title}
@@ -60,19 +62,25 @@ export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
           </p>
         )}
       </header>
-      <main className={notice || view.phase === 'closed' ? 'flex-1 grid place-items-center overflow-y-auto px-10 py-10' : 'px-10 py-10'}>
-        {notice ? (
-          <p className="text-center text-[clamp(4.5rem,6vw,8rem)] font-semibold leading-tight text-gray-600">{notice}</p>
-        ) : (
-          <div className="w-[min(92vw,88rem)] space-y-12">
-            {published && view.poll && <BoardResult poll={view.poll} large />}
-            {view.phase === 'closed' && !published && (
-              <p className="text-center text-[clamp(4.5rem,6vw,8rem)] font-semibold leading-tight text-gray-600">결과는 아직 공개되지 않았습니다.</p>
-            )}
-            {view.lamps.length > 0 && <BoardBody view={view} />}
-          </div>
-        )}
-      </main>
+      {notice || published ? (
+        <main className="flex-1 grid place-items-center overflow-y-auto px-10 py-10">
+          {notice ? (
+            <p className="text-center text-[clamp(4.5rem,6vw,8rem)] font-semibold leading-tight text-gray-600">{notice}</p>
+          ) : (
+            <div className="w-[min(92vw,88rem)] space-y-12">
+              {/* 결과를 공개하면 번호판 대신 결과만 크게 보인다. */}
+              {view.poll && <BoardResult poll={view.poll} large />}
+            </div>
+          )}
+        </main>
+      ) : (
+        <main className="flex-1 min-h-0 flex flex-col px-8 py-6">
+          {view.phase === 'closed' && (
+            <p className="shrink-0 pb-6 text-center text-[clamp(3rem,4.5vw,6rem)] font-semibold leading-tight text-gray-600">결과는 아직 공개되지 않았습니다.</p>
+          )}
+          {view.lamps.length > 0 && <FitBoard lamps={view.lamps} />}
+        </main>
+      )}
     </div>
   );
 }
@@ -110,6 +118,55 @@ function BoardBody({
         })}
       </ul>
       <p className={dense ? 'mt-4 text-sm text-gray-500' : 'mt-8 text-center text-2xl text-gray-500'}>
+        초록 번호는 투표를 마쳤습니다. 회색 번호는 아직입니다.
+      </p>
+    </div>
+  );
+}
+
+function FitBoard({ lamps }: { lamps: BoardLamp[] }) {
+  const areaRef = useRef<HTMLDivElement>(null);
+  const [area, setArea] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const node = areaRef.current;
+    if (!node) return;
+    const measure = () => setArea({ width: node.clientWidth, height: node.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const { size, cols } = fitTiles(lamps.length, area.width, area.height);
+  const gap = Math.floor(size * TILE_GAP_RATIO);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div ref={areaRef} className="flex-1 min-h-0 overflow-hidden">
+        {size > 0 && (
+          <ul
+            className="grid justify-center content-center h-full"
+            style={{ gridTemplateColumns: `repeat(${cols}, ${size}px)`, gap: `${gap}px` }}
+          >
+            {lamps.map((lamp) => {
+              const voted = lamp.state === 'voted';
+              return (
+                <li key={lamp.badge}>
+                  <div
+                    className={`grid place-items-center rounded-full font-bold tabular-nums ${voted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}
+                    style={{ width: size, height: size, fontSize: Math.max(14, Math.floor(size * 0.38)) }}
+                    aria-label={`${lamp.badge}번 ${voted ? '투표함' : '미투표'}`}
+                  >
+                    {lamp.badge}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      <p className="shrink-0 pt-4 text-center text-[clamp(1.5rem,1.8vw,2.5rem)] text-gray-600">
         초록 번호는 투표를 마쳤습니다. 회색 번호는 아직입니다.
       </p>
     </div>
