@@ -497,7 +497,7 @@ describe('firestore rules', () => {
     await assertSucceeds(getDoc(doc(voter(), 'attendanceSessions/session_' + UUID)));
   });
 
-  test('확정 인원 미만이면 투표되고 채우면 거부되며 인원은 관리자만 바꾼다', async () => {
+  test('투표 인원 미만이면 투표되고 채우면 거부되며 인원은 관리자만 바꾼다', async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll-cap'), pollData({ eligibilityMode: 'open', expectedCount: 1, castCount: 0 }));
       await setDoc(doc(db, 'polls/poll-cap/tally/current'), counts());

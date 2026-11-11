@@ -111,7 +111,7 @@ function emptyCounts(poll: Poll): Record<string, number> {
 
 function assertUnderHeadcount(poll: Poll): void {
   if (typeof poll.expectedCount === 'number' && poll.castCount >= poll.expectedCount) {
-    throw new Error('확정 인원만큼 투표가 끝났습니다.');
+    throw new Error('투표 인원만큼 투표가 끝났어요.');
   }
 }
 
@@ -190,7 +190,7 @@ export async function createAttendanceSession(voter: Voter, eventId = DEFAULT_EV
 
 export async function startPollWithParticipation(poll: Poll, expectedCount: number): Promise<void> {
   if (!Number.isInteger(expectedCount) || expectedCount < 1) {
-    throw new Error('확정 인원은 1명 이상이어야 합니다.');
+    throw new Error('투표 인원은 1명 이상이어야 해요.');
   }
   const now = Date.now();
   const durationSeconds = getDefaultDurationSeconds(poll);
@@ -380,7 +380,7 @@ export async function castAttendanceVote(
 
 export async function updateExpectedCount(pollId: string, expectedCount: number): Promise<void> {
   if (!Number.isInteger(expectedCount) || expectedCount < 1) {
-    throw new Error('확정 인원은 1명 이상이어야 합니다.');
+    throw new Error('투표 인원은 1명 이상이어야 해요.');
   }
   await updateDoc(doc(db, 'polls', pollId), { expectedCount });
 }

@@ -18,7 +18,7 @@ export default function HeadcountPanel({ poll, presenceCount, checkinCount }: He
   const save = async () => {
     const next = Number(draft);
     if (!Number.isInteger(next) || next < 1) {
-      setError('확정 인원은 1명 이상이어야 합니다.');
+      setError('투표 인원은 1명 이상이어야 해요.');
       return;
     }
     setSaving(true);
@@ -26,7 +26,7 @@ export default function HeadcountPanel({ poll, presenceCount, checkinCount }: He
     try {
       await updateExpectedCount(poll.id, next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '확정 인원을 바꾸지 못했습니다.');
+      setError(err instanceof Error ? err.message : '투표 인원을 바꾸지 못했어요.');
     } finally {
       setSaving(false);
     }
@@ -37,20 +37,21 @@ export default function HeadcountPanel({ poll, presenceCount, checkinCount }: He
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-bold text-gray-800">현장 인원</h2>
         {typeof expected === 'number' ? (
-          <p className="text-sm text-gray-500">투표는 {expected}표에서 멈춥니다</p>
+          <p className="text-sm text-gray-500">투표는 {expected}표에서 멈춰요</p>
         ) : (
-          <p className="text-sm text-gray-500">확정 인원이 없어 표 수 상한이 없습니다</p>
+          <p className="text-sm text-gray-500">투표 인원이 없어 표 수 상한이 없어요</p>
         )}
       </div>
+      <p className="text-sm text-gray-500 leading-relaxed">이 수만큼 표가 들어오면 투표가 마감돼요.</p>
       <div className="grid grid-cols-4 gap-2 text-center">
-        <Count label="확정" value={expected ?? '—'} />
+        <Count label="투표 인원" value={expected ?? '—'} />
         <Count label="접속" value={presenceCount} />
         <Count label="입장" value={checkinCount} />
         <Count label="투표" value={poll.castCount} />
       </div>
       {over && (
         <p className="text-sm text-accent leading-relaxed">
-          접속 또는 입장이 확정 인원보다 많습니다. 현장에서 인원을 확인한 뒤 확정 인원을 조정하세요.
+          접속 또는 입장이 투표 인원보다 많아요. 현장에서 인원을 확인한 뒤 투표 인원을 조정해 주세요.
         </p>
       )}
       <div className="flex items-center gap-2">
@@ -64,7 +65,7 @@ export default function HeadcountPanel({ poll, presenceCount, checkinCount }: He
             setError('');
           }}
           className="w-28 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/35"
-          aria-label="확정 인원"
+          aria-label="투표 인원"
         />
         <button
           type="button"
@@ -116,10 +117,11 @@ export function StartHeadcountDialog({
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <form onSubmit={submit} className="bg-surface rounded-2xl shadow-sm border border-border p-6 w-full max-w-sm space-y-4">
-        <h2 className="text-xl font-bold text-gray-800">확정 인원</h2>
+        <h2 className="text-xl font-bold text-gray-800">투표 인원</h2>
         <p className="text-sm text-gray-500 leading-relaxed">
-          현장에서 확인한 인원을 입력하면 그 수만큼만 투표가 집계됩니다. 인원이 바뀌면 진행 중에도 조정할 수 있습니다.
+          현장에서 확인한 인원을 입력하면 그 수만큼만 투표가 집계돼요. 인원이 바뀌면 진행 중에도 조정할 수 있어요.
         </p>
+        <p className="text-sm text-gray-500 leading-relaxed">이 수만큼 표가 들어오면 투표가 마감돼요.</p>
         {hint ? <p className="text-sm text-gray-500 leading-relaxed">{hint}</p> : null}
         <input
           type="number"
@@ -130,7 +132,7 @@ export function StartHeadcountDialog({
           autoFocus
           required
           className="w-full border border-gray-300 rounded-xl px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary/35"
-          aria-label="확정 인원"
+          aria-label="투표 인원"
         />
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">

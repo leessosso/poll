@@ -431,7 +431,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           defaultCount={openingPoll.eligibilityMode === 'roster' ? checkins.length : presenceCount}
           hint={
             openingPoll.eligibilityMode === 'roster' && checkins.length === 0
-              ? '이번 모임에 입장한 사람이 없어 기본값을 비워 두었습니다. 접속 수는 창이 열린 수라 확정 인원에 넣지 않습니다.'
+              ? '이번 모임에 입장한 사람이 없어 비워 두었어요. 접속 수는 창이 열린 기기 수라 투표 인원에 넣지 않아요.'
               : undefined
           }
           submitting={opening}
