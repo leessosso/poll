@@ -10,12 +10,8 @@ import {
 } from 'firebase/database';
 import { auth, rtdb } from '../lib/firebase';
 import { getClientId, getSessionId } from '../lib/client-id';
+import { getTodayKST } from '../lib/kst-date';
 import { ensureVoterUser } from '../lib/voter-auth';
-
-/** KST 기준 오늘 날짜를 YYYY-MM-DD 형식으로 반환 */
-function getTodayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 /**
  * 투표 화면 접속자 presence 등록 훅.

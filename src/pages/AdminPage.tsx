@@ -24,6 +24,7 @@ import VoteBoard from '../components/VoteBoard';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
+import AdminHeadcountBadge from '../components/AdminHeadcountBadge';
 import HeadcountPanel, { StartHeadcountDialog } from '../components/HeadcountPanel';
 
 const FAILURE_COPY: Record<ShellLoginFailure, { title: string; body: string }> = {
@@ -241,14 +242,25 @@ function EmergencyLogin() {
 
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const { polls } = usePolls('admin');
-  const { presenceCount, visitorCount } = usePresenceStats();
-  const { checkins } = useRosterDirectory('admin');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const { presenceCount, visitorCount, ready: statsReady } = usePresenceStats(refreshKey);
+  const { checkins, loading: rosterLoading } = useRosterDirectory('admin', refreshKey);
   const [showCreate, setShowCreate] = useState(false);
   const [openingPoll, setOpeningPoll] = useState<Poll | null>(null);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState('');
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!refreshing) return;
+    if (statsReady && !rosterLoading) {
+      setRefreshing(false);
+      setUpdatedAt(Date.now());
+    }
+  }, [refreshing, statsReady, rosterLoading]);
 
   const activePoll = polls.find((p) => p.status === 'active');
   const waitingPolls = polls.filter((p) => p.status === 'waiting');
@@ -302,15 +314,20 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="bg-primary text-white px-5 py-4 shadow flex items-center justify-between">
+      <header className="bg-primary text-white px-5 py-4 shadow flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-white/15 rounded-full px-3 py-1">
-            <span className="w-2 h-2 bg-accent rounded-full animate-pulse" />
-            <span className="text-sm font-medium">
-              진입 {visitorCount}명 · 현재 {presenceCount}명
-            </span>
-          </div>
+          <AdminHeadcountBadge
+            visitorCount={visitorCount}
+            presenceCount={presenceCount}
+            checkinCount={checkins.length}
+            refreshing={refreshing}
+            updatedAt={updatedAt}
+            onRefresh={() => {
+              setRefreshing(true);
+              setRefreshKey((key) => key + 1);
+            }}
+          />
           <Link to="/board" target="_blank" rel="noreferrer" className="text-sm text-white/80 underline">
             현황판
           </Link>
