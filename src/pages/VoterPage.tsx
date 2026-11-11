@@ -42,7 +42,7 @@ function VoterScreen() {
   const { polls, loading } = usePolls('voter');
   usePresence();
   const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
-  const { claim, ready: claimReady, saveClaim } = useRosterClaim();
+  const { claim, ready: claimReady, clearedStaleClaim, saveClaim } = useRosterClaim();
   const rosterDirectory = useRosterDirectory();
   const { votingFor, error: voteError, handleVote } = useVote();
 
@@ -129,8 +129,19 @@ function VoterScreen() {
         ) : (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <div className="text-4xl mb-3">⏳</div>
-            <p className="text-gray-500 font-medium">다음 투표를 기다려주세요</p>
-            <p className="text-gray-400 text-sm mt-1">관리자가 투표를 열면 바로 나타납니다</p>
+            {clearedStaleClaim ? (
+              <>
+                <p className="text-gray-800 font-semibold mb-2">새 모임이 시작되어 이전 입장이 해제됐어요</p>
+                <p className="text-gray-500 text-sm leading-relaxed">
+                  다음 투표가 시작되면 새 코드로 다시 입장해 주세요.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 font-medium">다음 투표를 기다려주세요</p>
+                <p className="text-gray-400 text-sm mt-1">관리자가 투표를 열면 바로 나타납니다</p>
+              </>
+            )}
           </div>
         )}
 

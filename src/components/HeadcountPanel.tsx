@@ -91,6 +91,7 @@ function Count({ label, value }: { label: string; value: number | string }) {
 
 interface StartHeadcountDialogProps {
   defaultCount: number;
+  hint?: string;
   submitting: boolean;
   error: string;
   onCancel: () => void;
@@ -99,6 +100,7 @@ interface StartHeadcountDialogProps {
 
 export function StartHeadcountDialog({
   defaultCount,
+  hint,
   submitting,
   error,
   onCancel,
@@ -118,6 +120,7 @@ export function StartHeadcountDialog({
         <p className="text-sm text-gray-500 leading-relaxed">
           현장에서 확인한 인원을 입력하면 그 수만큼만 투표가 집계됩니다. 인원이 바뀌면 진행 중에도 조정할 수 있습니다.
         </p>
+        {hint ? <p className="text-sm text-gray-500 leading-relaxed">{hint}</p> : null}
         <input
           type="number"
           min={1}
