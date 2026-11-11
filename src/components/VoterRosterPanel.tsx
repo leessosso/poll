@@ -16,9 +16,11 @@ import type { AttendanceSession, Poll, Voter } from '../types';
 interface VoterRosterPanelProps {
   eventId: string;
   activePoll: Poll | null;
+  /** 헤더의 접속 수. 새 모임 시작 안내문에 쓴다. */
+  presenceCount: number;
 }
 
-export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPanelProps) {
+export default function VoterRosterPanel({ eventId, activePoll, presenceCount }: VoterRosterPanelProps) {
   const { voters, claimedIds, reissueIds, badgeByVoterId } = useRosterDirectory('admin');
   const { roomCode, meetingId, loading: codeLoading } = useMeetingCode();
   const [meetingBusy, setMeetingBusy] = useState(false);
@@ -135,7 +137,7 @@ export default function VoterRosterPanel({ eventId, activePoll }: VoterRosterPan
     setMeetingBusy(true);
     try {
       await startNewMeeting();
-      setNotice({ text: '새 모임을 시작했습니다. 새 입장 코드를 화면에 띄워 주세요.', tone: 'ok' });
+      setNotice({ text: `입장이 초기화됐어요. 접속 ${presenceCount}명은 창이 열려 있는 기기 수라 그대로 보여요.`, tone: 'ok' });
     } catch (err) {
       setNotice({ text: err instanceof Error ? err.message : '새 모임을 시작하지 못했습니다.', tone: 'error' });
     } finally {

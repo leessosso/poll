@@ -9,6 +9,8 @@ import type { RosterClaim } from '../types';
 interface UseRosterClaimResult {
   claim: RosterClaim | null;
   ready: boolean;
+  /** 저장된 입장이 지난 모임 것이라 해제됐는지. 다음 투표 안내를 보여 줄 때 쓴다. */
+  clearedStaleClaim: boolean;
   saveClaim: (claim: RosterClaim) => void;
 }
 
@@ -36,6 +38,7 @@ function claimFromCheckin(data: Record<string, unknown>): RosterClaim | null {
 export function useRosterClaim(): UseRosterClaimResult {
   const { meetingId, loading: meetingLoading } = useCurrentMeeting();
   const [state, setState] = useState<ClaimState>(() => ({ claim: loadRosterClaim(), checkedKey: null }));
+  const [clearedStaleClaim, setClearedStaleClaim] = useState(false);
   const uid = auth.currentUser?.uid ?? '';
   const stored = state.claim;
   const current = stored && stored.meetingId === meetingId ? stored : null;
@@ -90,6 +93,7 @@ export function useRosterClaim(): UseRosterClaimResult {
         const found = snap.empty ? null : claimFromCheckin(snap.docs[0].data());
         if (found) {
           storeRosterClaim(found);
+          setClearedStaleClaim(false);
           setState({ claim: found, checkedKey: null });
         } else {
           setState({ claim: null, checkedKey: `${meetingId}:${uid}:` });
@@ -105,10 +109,15 @@ export function useRosterClaim(): UseRosterClaimResult {
 
   const saveClaim = (next: RosterClaim) => {
     storeRosterClaim(next);
+    setClearedStaleClaim(false);
     setState({ claim: next, checkedKey: null });
   };
 
   // 모임이 아직 없으면 확인할 입장도 없다.
   const ready = !meetingLoading && (!meetingId || !uid || state.checkedKey === key);
-  return { claim: current, ready, saveClaim };
+  const isStale = !meetingLoading && Boolean(stored && meetingId && stored.meetingId !== meetingId);
+  if (isStale && !clearedStaleClaim) {
+    setClearedStaleClaim(true);
+  }
+  return { claim: current, ready, clearedStaleClaim, saveClaim };
 }

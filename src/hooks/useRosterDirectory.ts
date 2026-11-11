@@ -28,7 +28,7 @@ interface UseRosterDirectoryResult {
 const NO_CLAIMS: { voterId: string; reissue: boolean }[] = [];
 const NO_CHECKINS: RosterCheckin[] = [];
 
-export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRosterDirectoryResult {
+export function useRosterDirectory(source: 'public' | 'admin' = 'public', refreshKey = 0): UseRosterDirectoryResult {
   const { meetingId, loading: meetingLoading } = useCurrentMeeting();
   const [voters, setVoters] = useState<Voter[]>([]);
   const [checkins, setCheckins] = useState<RosterCheckin[]>([]);
@@ -36,6 +36,12 @@ export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRo
   const [votersReady, setVotersReady] = useState(false);
   const [claimsKey, setClaimsKey] = useState<string | null>(null);
   const [checkinsKey, setCheckinsKey] = useState<string | null>(null);
+  const [seenRefreshKey, setSeenRefreshKey] = useState(refreshKey);
+  if (seenRefreshKey !== refreshKey) {
+    setSeenRefreshKey(refreshKey);
+    setClaimsKey(null);
+    setCheckinsKey(null);
+  }
 
   useEffect(() => {
     const collectionName = source === 'admin' ? 'voters' : 'voterDirectory';
@@ -76,7 +82,7 @@ export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRo
       },
       () => setClaimsKey(meetingId),
     );
-  }, [meetingId]);
+  }, [meetingId, refreshKey]);
 
   useEffect(() => {
     if (source !== 'admin' || !meetingId) return;
@@ -99,7 +105,7 @@ export function useRosterDirectory(source: 'public' | 'admin' = 'public'): UseRo
       },
       () => setCheckinsKey(meetingId),
     );
-  }, [source, meetingId]);
+  }, [source, meetingId, refreshKey]);
 
   const liveClaims = meetingId && claimsKey === meetingId ? claims : NO_CLAIMS;
   const liveCheckins = source === 'admin' && meetingId && checkinsKey === meetingId ? checkins : NO_CHECKINS;
