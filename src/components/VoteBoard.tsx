@@ -4,6 +4,7 @@ import { TILE_GAP_RATIO, fitTiles } from '../lib/board-fit';
 import { useBoardLamps } from '../hooks/useBoardLamps';
 import { usePolls } from '../hooks/usePolls';
 import { getOptions, getPollDecision, getPollTotal } from '../lib/poll-utils';
+import BoardEntryQr from './BoardEntryQr';
 import PollDecisionBadge from './PollDecisionBadge';
 import type { BoardLamp, Poll } from '../types';
 
@@ -53,14 +54,17 @@ export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
           {view.title}
           <span className="ml-3 text-[clamp(1.15rem,1.6vw,2rem)] font-normal text-white/70">{view.caption}</span>
         </h1>
-        {!loading && (view.total > 0 || view.phase !== 'closed') && (
-          <p className="text-[clamp(1.5rem,2.2vw,3rem)] tabular-nums shrink-0">
-            <span className="text-white/70">투표 </span>
-            <span className="font-semibold">{view.voted}</span>
-            <span className="text-white/70"> / 전체 </span>
-            <span className="font-semibold">{view.total}</span>
-          </p>
-        )}
+        <div className="flex items-center gap-4 shrink-0">
+          {!loading && (view.total > 0 || view.phase !== 'closed') && (
+            <p className="text-[clamp(1.5rem,2.2vw,3rem)] tabular-nums">
+              <span className="text-white/70">투표 </span>
+              <span className="font-semibold">{view.voted}</span>
+              <span className="text-white/70"> / 전체 </span>
+              <span className="font-semibold">{view.total}</span>
+            </p>
+          )}
+          <BoardEntryQr />
+        </div>
       </header>
       {notice || published ? (
         <main className="flex-1 grid place-items-center overflow-y-auto px-10 py-10">
