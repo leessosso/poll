@@ -13,6 +13,7 @@ import ExitDeviceModal from '../components/ExitDeviceModal';
 import RosterClaimGate from '../components/RosterClaimGate';
 import VoterAuthGate from '../components/VoterAuthGate';
 import { exitOwnCheckin } from '../lib/vote-service';
+import { pollTitle } from '../lib/org-config';
 
 export default function VoterPage() {
   const { ready, error } = useVoterAuth();
@@ -92,7 +93,7 @@ function VoterScreen() {
       <header className="bg-primary text-white px-5 py-4 shadow">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold">등촌교회 2청년회 투표 시스템</h1>
+            <h1 className="text-lg font-bold">{pollTitle}</h1>
             {session && (
               <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
             )}
