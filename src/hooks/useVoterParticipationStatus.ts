@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePageVisibleGeneration } from './usePageVisible';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Poll } from '../types';
@@ -7,6 +8,7 @@ export type ParticipationView = 'hidden' | 'loading' | 'pending' | 'completed' |
 
 export function useVoterParticipationStatus(poll: Poll | null, voterId: string | null): ParticipationView {
   const [view, setView] = useState<ParticipationView>('loading');
+  const visibleGeneration = usePageVisibleGeneration();
   const [snapshotKey, setSnapshotKey] = useState('');
   const pollId = poll?.id;
   const mode = poll?.eligibilityMode;
@@ -26,7 +28,7 @@ export function useVoterParticipationStatus(poll: Poll | null, voterId: string |
     });
 
     return unsub;
-  }, [pollId, voterId, mode]);
+  }, [pollId, voterId, mode, visibleGeneration]);
 
   if (!tracked) return 'hidden';
   if (snapshotKey !== currentKey) return 'loading';
