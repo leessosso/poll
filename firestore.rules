@@ -450,8 +450,10 @@ service cloud.firestore {
       allow list: if isAdmin()
         || signedIn() && resource.data.authUid == request.auth.uid;
       allow create: if voterClaimOk(checkinId);
-      // 본인 입장이 관리자에 의해 해제(revoked)된 뒤 같은 기기로 다시 받는 경우.
-      allow update: if resource.data.get('revoked', false) == true
+      // 본인 퇴장: revoked 만 true 로 바꾸고, 같은 쓰기에서 본인 번호(lamp)를 비운다.
+      // 퇴장 뒤 같은 기기로 다시 입장: 이미 회수된 문서를 voterClaimOk 로만 덮어쓴다.
+      allow update: if voterSelfExitOk(checkinId)
+        || resource.data.get('revoked', false) == true
           && resource.data.get('authUid', '') == request.auth.uid
           && voterClaimOk(checkinId)
         || isAdmin()
@@ -459,6 +461,17 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked'])
           && request.resource.data.revoked == true;
       allow delete: if isAdmin();
+    }
+
+    function voterSelfExitOk(checkinId) {
+      return isVoter()
+        && resource.data.get('authUid', '') == request.auth.uid
+        && checkinId == resource.data.meetingId + '_' + request.auth.uid
+        && resource.data.meetingId == currentMeetingId()
+        && resource.data.get('revoked', true) == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked'])
+        && request.resource.data.revoked == true
+        && !existsAfter(lampPath(resource.data.meetingId, resource.data.badge));
     }
 
     // 예전 이름 선점·재연결 컬렉션은 관리자만 정리용으로 접근한다.
@@ -504,7 +517,20 @@ service cloud.firestore {
           && get(checkinPath(resource.data.meetingId, request.auth.uid)).data.badge == resource.data.badge
           && get(checkinPath(resource.data.meetingId, request.auth.uid)).data.revoked == false
           && getAfter(partPath(resource.data.pollId, get(checkinPath(resource.data.meetingId, request.auth.uid)).data.voterId)).data.status == 'completed';
-      allow delete: if isAdmin();
+      allow delete: if isAdmin()
+        || isVoter() && voterOwnLampReleaseOk();
+    }
+
+    // 본인 퇴장과 같은 쓰기에서만, 본인 번호 칸을 지운다. 이미 회수된 입장으로는 다른 번호를 지울 수 없다.
+    function voterOwnLampReleaseOk() {
+      let checkin = get(checkinPath(resource.data.meetingId, request.auth.uid)).data;
+      let after = getAfter(checkinPath(resource.data.meetingId, request.auth.uid)).data;
+      return checkin.authUid == request.auth.uid
+        && checkin.badge == resource.data.badge
+        && checkin.revoked == false
+        && after.authUid == request.auth.uid
+        && after.badge == resource.data.badge
+        && after.revoked == true;
     }
 
     // 입장 코드 원문. 관리자만 읽는다.

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePolls } from '../hooks/usePolls';
 import { usePresence } from '../hooks/usePresence';
@@ -8,8 +9,10 @@ import { useVoterParticipationStatus } from '../hooks/useVoterParticipationStatu
 import { useVoterSession } from '../hooks/useVoterSession';
 import ActivePollCard from '../components/ActivePollCard';
 import ClosedPollCard from '../components/ClosedPollCard';
+import ExitDeviceModal from '../components/ExitDeviceModal';
 import RosterClaimGate from '../components/RosterClaimGate';
 import VoterAuthGate from '../components/VoterAuthGate';
+import { exitOwnCheckin } from '../lib/vote-service';
 
 export default function VoterPage() {
   const { ready, error } = useVoterAuth();
@@ -41,8 +44,11 @@ function VoterScreen() {
   const { polls, loading } = usePolls('voter', { tallyScope: 'none' });
   usePresence();
   const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
-  const { claim, ready: claimReady, meetingOpen, clearedStaleClaim, saveClaim } = useRosterClaim();
+  const { claim, ready: claimReady, meetingOpen, clearedStaleClaim, saveClaim, clearClaim } = useRosterClaim();
   const { votingFor, error: voteError, handleVote } = useVote();
+  const [confirmingExit, setConfirmingExit] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [exitError, setExitError] = useState('');
 
   const activePoll = polls.find((p) => p.status === 'active');
   const rosterPollOpen = polls.some((poll) => poll.eligibilityMode === 'roster' && poll.status !== 'closed');
@@ -53,6 +59,25 @@ function VoterScreen() {
   const closedPolls = polls.filter((p) => p.status === 'closed');
   const requiresAttendance = activePoll?.eligibilityMode === 'attendance';
   const requiresRoster = activePoll?.eligibilityMode === 'roster';
+  // 모임이 열려 있으면 투표 전에도 코드로 입장하고, 퇴장 뒤에는 다시 코드 입력으로 돌아온다.
+  const needsRosterClaim = requiresRoster || (!activePoll && (rosterPollOpen || meetingOpen));
+  // 투표가 진행 중이면 퇴장 버튼을 숨긴다. 이미 던진 표는 비밀투표라 거둘 수 없다.
+  const canExit = Boolean(claim) && !activePoll;
+
+  const handleExit = async () => {
+    if (!claim) return;
+    setExiting(true);
+    setExitError('');
+    try {
+      await exitOwnCheckin(claim);
+      clearClaim();
+      setConfirmingExit(false);
+    } catch (err) {
+      setExitError(err instanceof Error ? err.message : '퇴장하지 못했습니다.');
+    } finally {
+      setExiting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -92,11 +117,11 @@ function VoterScreen() {
         ) : null}
         {activePoll && requiresAttendance && !session ? (
           <VoterAuthGate loading={sessionLoading} error={sessionError} />
-        ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claimReady ? (
+        ) : needsRosterClaim && !claimReady ? (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <p className="text-gray-500 font-medium">입장 정보를 확인 중입니다</p>
           </div>
-        ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claim ? (
+        ) : needsRosterClaim && !claim ? (
           <RosterClaimGate meetingOpen={meetingOpen} onClaimed={saveClaim} />
         ) : activePoll && requiresRoster && participation === 'loading' ? (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
@@ -122,7 +147,7 @@ function VoterScreen() {
         ) : (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
             <div className="text-4xl mb-3">⏳</div>
-            {clearedStaleClaim ? (
+            {clearedStaleClaim && !claim ? (
               <>
                 <p className="text-gray-800 font-semibold mb-2">새 모임이 시작되어 이전 입장이 해제됐어요</p>
                 <p className="text-gray-500 text-sm leading-relaxed">
@@ -134,6 +159,25 @@ function VoterScreen() {
                 <p className="text-gray-500 font-medium">다음 투표를 기다려주세요</p>
                 <p className="text-gray-400 text-sm mt-1">관리자가 투표를 열면 바로 나타납니다</p>
               </>
+            )}
+            {canExit && (
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExitError('');
+                    setConfirmingExit(true);
+                  }}
+                  disabled={exiting}
+                  className="w-full border border-border text-gray-600 py-3 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  퇴장
+                </button>
+                <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                  다른 기기로도 입장했다면, 쓰지 않는 기기에서 퇴장해 주세요.
+                </p>
+                {exitError && <p className="text-sm text-red-500 mt-2">{exitError}</p>}
+              </div>
             )}
           </div>
         )}
@@ -151,6 +195,15 @@ function VoterScreen() {
           </section>
         )}
       </main>
+      {confirmingExit && canExit && (
+        <ExitDeviceModal
+          loading={exiting}
+          onConfirm={() => void handleExit()}
+          onCancel={() => {
+            if (!exiting) setConfirmingExit(false);
+          }}
+        />
+      )}
     </div>
   );
 }

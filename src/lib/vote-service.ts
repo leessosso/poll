@@ -507,6 +507,33 @@ export async function releaseMeetingCheckin(
   });
 }
 
+/**
+ * 투표자 본인 퇴장. 이 기기의 입장만 회수하고 현황판 번호를 비운다.
+ * 같은 기기는 입장 코드로 다시 들어올 수 있다. 이미 던진 표(voteGuards)는 그대로 남는다.
+ */
+export async function exitOwnCheckin(claim: RosterClaim): Promise<void> {
+  const uid = requireUid();
+  if (claim.voterId !== uid) {
+    throw new Error('이 기기의 입장만 퇴장할 수 있습니다.');
+  }
+  const checkinRef = doc(db, 'checkins', checkinId(claim.meetingId, uid));
+  try {
+    await runTransaction(db, async (tx) => {
+      const checkinSnap = await tx.get(checkinRef);
+      const checkin = checkinSnap.exists() ? checkinSnap.data() : null;
+      if (!checkin || checkin.revoked !== false || checkin.authUid !== uid) {
+        throw new Error('입장 정보가 없습니다.');
+      }
+      const liveBadge = badgeOf(checkin) ?? (claim.badge ?? null);
+      const seatSnap = liveBadge ? await tx.get(lampRef(claim.meetingId, liveBadge)) : null;
+      tx.update(checkinRef, { revoked: true });
+      if (seatSnap?.exists()) tx.delete(seatSnap.ref);
+    });
+  } catch (err) {
+    throw permissionError(err, '퇴장하지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.');
+  }
+}
+
 export async function removeVoterFromRoster(voterId: string, activePoll: Poll | null): Promise<void> {
   const participantRef = tracksParticipation(activePoll)
     ? doc(db, 'polls', activePoll.id, 'participation', voterId)

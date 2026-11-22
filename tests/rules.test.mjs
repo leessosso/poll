@@ -285,6 +285,62 @@ describe('firestore rules', () => {
     await assertFails(setDoc(doc(voter('voter-2'), `checkins/${MID}_voter-1`), checkinBody('voter-2', { badge: 421 })));
   });
 
+  test('투표자는 본인 입장만 퇴장하고 번호는 비우며 같은 코드로 다시 입장할 수 있다', async () => {
+    await seedMeeting();
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { badge: 418 }));
+
+    // 본인 입장만, 그리고 같은 쓰기에서 본인 번호만 지운다.
+    await assertFails(selfExit(voter(), 'voter-1', 417, { alsoRevoke: false }));
+    await assertFails(selfExit(voter(), 'voter-1', 417, { alsoDeleteLamp: false }));
+    await assertFails(selfExit(voter(), 'voter-1', 418));
+    await assertFails(selfExit(voter(), 'voter-2', 418));
+    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: true, badge: 500 }));
+    await assertSucceeds(selfExit(voter(), 'voter-1', 417));
+
+    const mine = await assertSucceeds(getDoc(doc(voter(), `checkins/${MID}_voter-1`)));
+    assert.equal(mine.data().revoked, true);
+    const lamp = await assertSucceeds(getDoc(doc(voter('voter-2'), `lamps/${MID}_417`)));
+    assert.equal(lamp.exists(), false);
+    // 다른 기기의 입장은 그대로다.
+    const other = await assertSucceeds(getDoc(doc(admin(), `checkins/${MID}_voter-2`)));
+    assert.equal(other.data().revoked, false);
+    const otherLamp = await assertSucceeds(getDoc(doc(voter(), `lamps/${MID}_418`)));
+    assert.equal(otherLamp.exists(), true);
+
+    // 회수만 되돌리거나, 이미 퇴장한 뒤로 다른 번호를 지우지는 못한다.
+    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: false }));
+    await assertFails(deleteDoc(doc(voter(), `lamps/${MID}_418`)));
+
+    // 같은 기기는 입장 코드로 다시 들어온다. 비워 둔 번호를 다시 쓸 수 있다.
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+  });
+
+  test('퇴장 뒤 다시 입장해도 이미 투표한 기기는 같은 투표에 다시 투표하지 못한다', async () => {
+    await seedMeeting();
+    await seedRoster();
+    await seed(async (db) => {
+      await setDoc(doc(db, `lamps/${MID}_417`), { meetingId: MID, badge: 417, state: 'pending', pollId: 'poll1' });
+    });
+    await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성', { lamp: `lamps/${MID}_417` }));
+    await assertSucceeds(selfExit(voter(), 'voter-1', 417));
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 421 }));
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1/participation/voter-1'), {
+        voterId: 'voter-1',
+        voterName: '421번',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+    await assertFails(rosterVote(voter(), 'voter-1', '반대'));
+    let tally;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      tally = (await getDoc(doc(ctx.firestore(), 'polls/poll1/tally/current'))).data();
+    });
+    assert.deepEqual(tally.counts, { 찬성: 1, 반대: 0, 기권: 0 });
+  });
+
   test('현장 입장 투표는 한 칸만 올리고 참여 문서에 선택을 남기지 않는다', async () => {
     await seedRoster();
 
@@ -637,6 +693,14 @@ function checkinBody(uid, { voterId = uid, badge, name = `${badge}번`, code = C
     revoked: false,
     ...extra,
   };
+}
+
+/** 앱의 exitOwnCheckin 과 같은 쓰기. */
+function selfExit(db, uid, badge, { alsoRevoke = true, alsoDeleteLamp = true, mid = MID } = {}) {
+  return runTransaction(db, async (tx) => {
+    if (alsoRevoke) tx.update(doc(db, `checkins/${mid}_${uid}`), { revoked: true });
+    if (alsoDeleteLamp) tx.delete(doc(db, `lamps/${mid}_${badge}`));
+  });
 }
 
 /** 앱의 claimRosterSeat 와 같은 쓰기 (코드 전용). */

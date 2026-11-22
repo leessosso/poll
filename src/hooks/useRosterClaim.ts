@@ -13,6 +13,7 @@ interface UseRosterClaimResult {
   /** 저장된 입장이 지난 모임 것이라 해제됐는지. 다음 투표 안내를 보여 줄 때 쓴다. */
   clearedStaleClaim: boolean;
   saveClaim: (claim: RosterClaim) => void;
+  clearClaim: () => void;
 }
 
 type ClaimState = { claim: RosterClaim | null; checkedKey: string | null };
@@ -34,7 +35,7 @@ function claimFromCheckin(data: Record<string, unknown>): RosterClaim | null {
  * 이 기기의 현장 입장.
  * - checkins/{meetingId}_{authUid} 단일 문서만 구독해 서버 상태와 맞춘다(1읽기).
  * - localStorage가 비어 있어도 같은 익명 계정이 현재 모임에 입장해 있으면 자동으로 복원한다.
- * - 새 모임이 시작되거나 관리자가 입장 해제(revoked)하면 이 기기의 입장은 풀린다.
+ * - 새 모임이 시작되거나 본인·관리자가 입장 해제(revoked)하면 이 기기의 입장은 풀린다.
  */
 export function useRosterClaim(): UseRosterClaimResult {
   const { meetingId, loading: meetingLoading } = useCurrentMeeting();
@@ -87,6 +88,11 @@ export function useRosterClaim(): UseRosterClaimResult {
     setState((prev) => ({ claim: next, checkedKey: prev.checkedKey }));
   };
 
+  const clearClaim = () => {
+    clearRosterClaim();
+    setState((prev) => ({ claim: null, checkedKey: prev.checkedKey }));
+  };
+
   // 모임이 아직 없으면 확인할 입장도 없다.
   const ready = !meetingLoading && (!meetingId || !uid || state.checkedKey === key);
   const isStale = !meetingLoading && Boolean(stored && meetingId && stored.meetingId !== meetingId);
@@ -99,5 +105,6 @@ export function useRosterClaim(): UseRosterClaimResult {
     meetingOpen: Boolean(meetingId),
     clearedStaleClaim,
     saveClaim,
+    clearClaim,
   };
 }
