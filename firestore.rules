@@ -14,6 +14,7 @@ rules_version = '2';
 // 현장 입장은 모임(meetingId) 단위다.
 // - meeting/current: 관리자만 읽는다. 입장 코드 원문과 현재 모임 id.
 // - meetingPublic/current: 현재 모임 id 만 공개한다.
+// - boardState/current: 현황판 대기/결과 모드. 로그인한 사용자는 읽고 관리자만 쓴다.
 // - entryCodes/{sha256(meetingId:code)}: 아무도 읽지 못한다. 입장 때 규칙이 존재를 확인한다.
 // - checkins/{meetingId}_{authUid}: 관리자와 본인만 읽는다. 익명 uid 와 번호 연결은 여기에만 있다.
 // - lamps/{meetingId}_{badge}: 현황판. 번호와 상태만 있고 유권자 id는 없다.
@@ -552,6 +553,17 @@ service cloud.firestore {
         && docId == 'current'
         && request.resource.data.keys().hasOnly(['meetingId', 'updatedAt'])
         && validMeetingId(request.resource.data.meetingId)
+        && request.resource.data.updatedAt is number;
+      allow delete: if false;
+    }
+
+    // 투표와 투표 사이 현황판을 준비 화면으로 바꿀 때 쓴다. 문서는 지우지 않는다.
+    match /boardState/{docId} {
+      allow read: if signedIn() && docId == 'current';
+      allow create, update: if isAdmin()
+        && docId == 'current'
+        && request.resource.data.keys().hasOnly(['mode', 'updatedAt'])
+        && request.resource.data.mode in ['standby', 'results']
         && request.resource.data.updatedAt is number;
       allow delete: if false;
     }

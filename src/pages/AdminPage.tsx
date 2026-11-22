@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { isAdminAccount } from '../lib/admin-auth';
+import { emergencyAdminEmail } from '../lib/emergency-admin';
 import { auth, db } from '../lib/firebase';
 import {
   buildAdminReturnTo,
@@ -175,7 +176,7 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
 }
 
 function EmergencyLogin() {
-  const [email, setEmail] = useState('');
+  const [adminId, setAdminId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -185,7 +186,7 @@ function EmergencyLogin() {
     setSubmitting(true);
     setError('');
     try {
-      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const credential = await signInWithEmailAndPassword(auth, emergencyAdminEmail(adminId), password);
       const token = await credential.user.getIdTokenResult(true);
       if (!isAdminAccount(credential.user, token.claims)) {
         await signOut(auth);
@@ -194,7 +195,7 @@ function EmergencyLogin() {
     } catch (err) {
       const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
       if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found' || code === 'auth/invalid-email') {
-        setError('이메일 또는 비밀번호가 틀렸습니다');
+        setError('아이디 또는 비밀번호가 틀렸습니다');
       } else if (code === 'auth/operation-not-allowed') {
         setError('이메일 로그인이 꺼져 있습니다. Firebase 콘솔에서 Email/Password 제공자를 켜 주세요.');
       } else {
@@ -210,15 +211,24 @@ function EmergencyLogin() {
       <p className="text-gray-400 text-xs leading-relaxed">
         2청년회 웹이 멈춰 있을 때만 사용합니다. 미리 만들어 둔 Firebase 계정과 관리자 클레임이 있어야 합니다.
       </p>
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => { setEmail(e.target.value); setError(''); }}
-        placeholder="이메일"
-        autoComplete="username"
-        className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
-        required
-      />
+      <div>
+        <label htmlFor="emergency-admin-id" className="mb-1.5 block text-sm font-medium text-gray-600">
+          아이디
+        </label>
+        <input
+          id="emergency-admin-id"
+          type="text"
+          value={adminId}
+          onChange={(e) => { setAdminId(e.target.value); setError(''); }}
+          placeholder="admin2ch"
+          autoComplete="username"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/35"
+          required
+        />
+      </div>
       <input
         type="password"
         value={password}

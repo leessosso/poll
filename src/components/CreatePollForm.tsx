@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { applyBoardMode } from '../lib/board-state';
 import { db } from '../lib/firebase';
 import type { EligibilityMode, Poll, PollType } from '../types';
 
@@ -98,6 +99,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
         batch.set(doc(db, 'polls', pollRef.id, 'tally', 'current'), {
           counts: Object.fromEntries(finalOptions.map((option) => [option, 0])),
         });
+        applyBoardMode(batch, 'results');
         await batch.commit();
       }
       onClose();

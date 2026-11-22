@@ -13,6 +13,7 @@ import {
   type WriteBatch,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { applyBoardMode } from './board-state';
 import { MEETING_PUBLIC_DOC, ROOM_CODE_LENGTH, checkinId, entryCodeHash, lampId } from './meeting';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
 import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
@@ -259,6 +260,7 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
     expectedCount,
     ...(meetingId ? { meetingId } : {}),
   }));
+  ops.push((batch) => applyBoardMode(batch, 'results', now));
   await commitOps(ops);
 }
 

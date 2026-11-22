@@ -11,6 +11,12 @@ interface VoteBoardViewProps {
   loading: boolean;
   error: string | null;
   headerExtra?: ReactNode;
+  /** 투표 사이 준비 화면. 이전 결과 대신 안내 문구를 보여준다. */
+  standby?: boolean;
+  /** 현재 모임 입장 인원. 관리자 현황판에서만 쓴다. */
+  entryCount?: number;
+  showEntryCount?: boolean;
+  boardControls?: ReactNode;
 }
 
 export default function VoteBoardView({
@@ -19,9 +25,13 @@ export default function VoteBoardView({
   loading,
   error,
   headerExtra,
+  standby = false,
+  entryCount = 0,
+  showEntryCount = false,
+  boardControls,
 }: VoteBoardViewProps) {
-  const published = view.phase === 'closed' && view.poll?.showResults === true;
-  const notice = published ? null : boardNotice(loading, error, view);
+  const published = !standby && view.phase === 'closed' && view.poll?.showResults === true;
+  const notice = standby || published ? null : boardNotice(loading, error, view);
 
   if (layout === 'panel') {
     return (
@@ -29,21 +39,28 @@ export default function VoteBoardView({
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h3 className="font-bold text-gray-800">번호 현황판</h3>
-            <p className="text-sm text-gray-500 mt-1">{view.caption}</p>
+            <p className="text-sm text-gray-500 mt-1">{standby ? '다음 투표 준비 중' : view.caption}</p>
           </div>
           {headerExtra}
         </div>
-        {published && view.poll && <BoardResult poll={view.poll} />}
-        {view.phase === 'closed' && !published && !notice && (
-          <p className="mb-3 text-sm text-gray-500">결과는 아직 공개되지 않았습니다.</p>
+        {boardControls}
+        {standby ? (
+          <p className="mb-3 text-center text-base font-semibold text-gray-700">다음 투표를 준비 중입니다</p>
+        ) : (
+          <>
+            {published && view.poll && <BoardResult poll={view.poll} />}
+            {view.phase === 'closed' && !published && !notice && (
+              <p className="mb-3 text-sm text-gray-500">결과는 아직 공개되지 않았습니다.</p>
+            )}
+            {notice ? (
+              <p className="text-sm text-gray-500">{notice}</p>
+            ) : view.lamps.length > 0 ? (
+              <div className={published ? 'mt-5' : undefined}>
+                <BoardBody view={view} dense />
+              </div>
+            ) : null}
+          </>
         )}
-        {notice ? (
-          <p className="text-sm text-gray-500">{notice}</p>
-        ) : view.lamps.length > 0 ? (
-          <div className={published ? 'mt-5' : undefined}>
-            <BoardBody view={view} dense />
-          </div>
-        ) : null}
       </section>
     );
   }
@@ -52,11 +69,19 @@ export default function VoteBoardView({
     <div className="h-screen overflow-hidden bg-background text-gray-900 flex flex-col">
       <header className="shrink-0 bg-primary text-white px-[clamp(1rem,2vw,2rem)] py-[clamp(0.35rem,1.4vh,1rem)] flex items-center justify-between gap-4">
         <h1 className="min-w-0 text-[clamp(1.15rem,2.2vw,3rem)] font-semibold leading-tight">
-          {view.title}
-          <span className="ml-3 text-[clamp(0.9rem,1.6vw,2rem)] font-normal text-white/70">{view.caption}</span>
+          {standby ? '현황판' : view.title}
+          <span className="ml-3 text-[clamp(0.9rem,1.6vw,2rem)] font-normal text-white/70">
+            {standby ? '준비 중' : view.caption}
+          </span>
         </h1>
         <div className="flex items-center gap-4 shrink-0">
-          {!loading && (view.total > 0 || view.phase !== 'closed') && (
+          {standby && showEntryCount && (
+            <p className="text-[clamp(1.15rem,2.2vw,3rem)] tabular-nums leading-tight">
+              <span className="text-white/70">입장 </span>
+              <span className="font-semibold">{entryCount}</span>
+            </p>
+          )}
+          {!standby && !loading && (view.total > 0 || view.phase !== 'closed') && (
             <p className="text-[clamp(1.15rem,2.2vw,3rem)] tabular-nums leading-tight">
               <span className="text-white/70">투표 </span>
               <span className="font-semibold">{view.voted}</span>
@@ -67,7 +92,13 @@ export default function VoteBoardView({
           {headerExtra}
         </div>
       </header>
-      {notice || published ? (
+      {standby ? (
+        <main className="flex-1 min-h-0 overflow-hidden grid place-items-center px-[clamp(1rem,2.5vw,2.5rem)] py-[clamp(0.5rem,2vh,1.5rem)]">
+          <p className="text-center text-[clamp(2rem,8vh,8rem)] font-semibold leading-tight text-gray-600">
+            다음 투표를 준비 중입니다
+          </p>
+        </main>
+      ) : notice || published ? (
         <main className="flex-1 min-h-0 overflow-hidden px-[clamp(1rem,2.5vw,2.5rem)] py-[clamp(0.5rem,2vh,1.5rem)]">
           {notice ? (
             <div className="grid h-full place-items-center">
