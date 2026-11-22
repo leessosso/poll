@@ -3,7 +3,6 @@ import { usePolls } from '../hooks/usePolls';
 import { usePresence } from '../hooks/usePresence';
 import { useVoterAuth } from '../hooks/useVoterAuth';
 import { useRosterClaim } from '../hooks/useRosterClaim';
-import { useRosterDirectory } from '../hooks/useRosterDirectory';
 import { useVote } from '../hooks/useVote';
 import { useVoterParticipationStatus } from '../hooks/useVoterParticipationStatus';
 import { useVoterSession } from '../hooks/useVoterSession';
@@ -39,11 +38,10 @@ export default function VoterPage() {
 
 function VoterScreen() {
   const { sessionId } = useParams();
-  const { polls, loading } = usePolls('voter');
+  const { polls, loading } = usePolls('voter', { tallyScope: 'none' });
   usePresence();
   const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
-  const { claim, ready: claimReady, clearedStaleClaim, saveClaim } = useRosterClaim();
-  const rosterDirectory = useRosterDirectory();
+  const { claim, ready: claimReady, meetingOpen, clearedStaleClaim, saveClaim } = useRosterClaim();
   const { votingFor, error: voteError, handleVote } = useVote();
 
   const activePoll = polls.find((p) => p.status === 'active');
@@ -73,8 +71,9 @@ function VoterScreen() {
         )}
         {claim && (
           <p className="text-white/80 text-sm mt-1">
-            {claim.voterName}님 입장 완료
-            {claim.badge ? ` · ${claim.badge}번` : ''}
+            {claim.badge && claim.voterName === `${claim.badge}번`
+              ? `입장 완료 · ${claim.badge}번`
+              : `${claim.voterName}님 입장 완료${claim.badge ? ` · ${claim.badge}번` : ''}`}
           </p>
         )}
       </header>
@@ -98,21 +97,15 @@ function VoterScreen() {
             <p className="text-gray-500 font-medium">입장 정보를 확인 중입니다</p>
           </div>
         ) : (requiresRoster || (!activePoll && rosterPollOpen)) && !claim ? (
-          <RosterClaimGate
-            voters={rosterDirectory.voters}
-            claimedIds={rosterDirectory.claimedIds}
-            loading={rosterDirectory.loading}
-            meetingOpen={Boolean(rosterDirectory.meetingId)}
-            onClaimed={saveClaim}
-          />
+          <RosterClaimGate meetingOpen={meetingOpen} onClaimed={saveClaim} />
         ) : activePoll && requiresRoster && participation === 'loading' ? (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
-            <p className="text-gray-500 font-medium">투표 명단을 확인 중입니다</p>
+            <p className="text-gray-500 font-medium">투표 대상 여부를 확인 중입니다</p>
           </div>
         ) : activePoll && requiresRoster && participation === 'absent' ? (
           <div className="bg-surface rounded-2xl p-8 text-center shadow-sm border border-border">
-            <p className="text-gray-800 font-semibold mb-2">이번 투표 명단에 없습니다</p>
-            <p className="text-gray-500 text-sm">투표가 시작된 뒤에 입장한 이름은 이번 투표에 포함되지 않습니다.</p>
+            <p className="text-gray-800 font-semibold mb-2">이번 투표 대상에 포함되지 않았습니다</p>
+            <p className="text-gray-500 text-sm">투표가 시작된 뒤에 입장한 기기는 이번 투표에 포함되지 않습니다.</p>
           </div>
         ) : activePoll ? (
           <ActivePollCard

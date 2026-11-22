@@ -31,7 +31,7 @@ export function useVote(): UseVoteResult {
       return false;
     }
     if (poll.eligibilityMode === 'roster' && !claim) {
-      setError('이름을 먼저 선택해 주세요.');
+      setError('먼저 입장 코드를 입력해 입장해 주세요.');
       return false;
     }
 

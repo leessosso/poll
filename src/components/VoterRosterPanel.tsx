@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useMeetingCode } from '../hooks/useMeetingCode';
+import type { RosterCheckin } from '../hooks/useMeetingCheckins';
 import { useRosterDirectory } from '../hooks/useRosterDirectory';
 import { rotateRoomCode, startNewMeeting } from '../lib/meeting';
 import {
   createAttendanceSession,
-  reissueRosterClaim,
-  releaseRosterClaim,
+  releaseMeetingCheckin,
   removeVoterFromRoster,
   revokeAttendanceSession,
 } from '../lib/vote-service';
@@ -18,97 +18,20 @@ interface VoterRosterPanelProps {
   activePoll: Poll | null;
   /** 헤더의 접속 수. 새 모임 시작 안내문에 쓴다. */
   presenceCount: number;
+  checkins: RosterCheckin[];
 }
 
-export default function VoterRosterPanel({ eventId, activePoll, presenceCount }: VoterRosterPanelProps) {
-  const { voters, claimedIds, reissueIds, badgeByVoterId } = useRosterDirectory('admin');
+export default function VoterRosterPanel({
+  eventId,
+  activePoll,
+  presenceCount,
+  checkins,
+}: VoterRosterPanelProps) {
   const { roomCode, meetingId, loading: codeLoading } = useMeetingCode();
   const [meetingBusy, setMeetingBusy] = useState(false);
-  const [reissuingId, setReissuingId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
-  const [namesText, setNamesText] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
   const [releasingId, setReleasingId] = useState<string | null>(null);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [showRoster, setShowRoster] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
-
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'attendanceSessions'), (snap) => {
-      setSessions(
-        snap.docs
-          .map((sessionDoc) => ({ id: sessionDoc.id, ...sessionDoc.data() }) as AttendanceSession)
-          .filter(
-            (session) =>
-              session.eventId === eventId && session.status === 'active' && session.expiresAt > Date.now(),
-          ),
-      );
-    });
-    return unsub;
-  }, [eventId]);
-
-  const parsedNames = parseRosterNames(namesText);
-
-  const addVoters = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const existing = new Set(voters.map((voter) => voter.name.trim()));
-    const fresh = parsedNames.filter((voterName) => !existing.has(voterName));
-    const skipped = parsedNames.length - fresh.length;
-    if (fresh.length === 0) {
-      setNotice({
-        text: parsedNames.length === 0 ? '이름을 입력해 주세요.' : '입력한 이름은 이미 명단에 있습니다.',
-        tone: 'error',
-      });
-      return;
-    }
-
-    setAdding(true);
-    setNotice(null);
-    try {
-      const now = Date.now();
-      for (let offset = 0; offset < fresh.length; offset += 400) {
-        const batch = writeBatch(db);
-        fresh.slice(offset, offset + 400).forEach((voterName) => {
-          const voterRef = doc(collection(db, 'voters'));
-          batch.set(voterRef, {
-            name: voterName,
-            externalQrId: '',
-            active: true,
-            createdAt: now,
-          });
-          batch.set(doc(db, 'voterDirectory', voterRef.id), {
-            name: voterName,
-            active: true,
-            createdAt: now,
-          });
-        });
-        await batch.commit();
-      }
-      setNamesText('');
-      setNotice({
-        text:
-          skipped > 0
-            ? `${fresh.length}명을 추가했습니다. 이미 있는 이름 ${skipped}명은 건너뛰었습니다.`
-            : `${fresh.length}명을 추가했습니다.`,
-        tone: 'ok',
-      });
-    } catch (err) {
-      setNotice({ text: err instanceof Error ? err.message : '명단을 추가하지 못했습니다.', tone: 'error' });
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const createSession = async (voter: Voter) => {
-    setLoadingId(voter.id);
-    try {
-      await createAttendanceSession(voter, eventId);
-    } finally {
-      setLoadingId(null);
-    }
-  };
-
-  const hasActiveSession = (voterId: string) => sessions.some((session) => session.voterId === voterId);
 
   const changeRoomCode = async () => {
     setNotice(null);
@@ -145,38 +68,16 @@ export default function VoterRosterPanel({ eventId, activePoll, presenceCount }:
     }
   };
 
-  const reissueClaim = async (voter: Voter) => {
-    if (!confirm(`"${voter.name}" 님을 새 기기로 다시 연결할까요?\n지금 기기의 입장은 풀리고, 새 기기에서 같은 이름을 고르면 같은 번호로 들어옵니다.`)) return;
-    setReissuingId(voter.id);
-    setNotice(null);
-    try {
-      await reissueRosterClaim(voter.id, activePoll);
-      setNotice({ text: `${voter.name} 님은 이제 새 기기에서 입장 코드와 이름을 다시 고르면 됩니다.`, tone: 'ok' });
-    } catch (err) {
-      setNotice({ text: err instanceof Error ? err.message : '다시 연결하지 못했습니다.', tone: 'error' });
-    } finally {
-      setReissuingId(null);
+  const handleReleaseCheckin = async (checkin: RosterCheckin) => {
+    const label = checkin.badge ? `${checkin.badge}번` : checkin.voterName;
+    if (!confirm(`${label} 입장을 해제할까요?\n현황판 번호가 지워지고, 해당 기기는 다시 입장 코드로 들어와야 합니다.`)) {
+      return;
     }
-  };
-
-  const removeVoter = async (voter: Voter) => {
-    if (!confirm(`"${voter.name}" 님을 명단에서 제거할까요?`)) return;
-    setRemovingId(voter.id);
+    setReleasingId(checkin.id);
     setNotice(null);
     try {
-      await removeVoterFromRoster(voter.id, activePoll);
-    } catch (err) {
-      setNotice({ text: err instanceof Error ? err.message : '명단에서 제거하지 못했습니다.', tone: 'error' });
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  const releaseClaim = async (voter: Voter) => {
-    setReleasingId(voter.id);
-    setNotice(null);
-    try {
-      await releaseRosterClaim(voter.id, activePoll);
+      await releaseMeetingCheckin(checkin.id, checkin.voterId, checkin.badge, activePoll);
+      setNotice({ text: `${label} 입장을 해제했습니다.`, tone: 'ok' });
     } catch (err) {
       setNotice({ text: err instanceof Error ? err.message : '입장을 해제하지 못했습니다.', tone: 'error' });
     } finally {
@@ -190,10 +91,10 @@ export default function VoterRosterPanel({ eventId, activePoll, presenceCount }:
         <div>
           <h2 className="font-bold text-gray-800">현장 입장</h2>
           <p className="text-sm text-gray-400 mt-1">
-            이 6자리 코드를 화면에 띄우세요. 투표 시작 전에 이름을 고른 사람이 이번 투표 인원입니다. 모임마다 '새 모임 시작'으로 입장을 비우고 시작하세요.
+            이 6자리 코드를 화면에 띄우세요. 투표 시작 전에 입장 코드를 입력한 기기가 이번 투표 인원입니다. 모임마다 &apos;새 모임 시작&apos;으로 입장을 비우고 시작하세요.
           </p>
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <p className="text-3xl font-bold tracking-widest text-primary">
             {codeLoading ? '------' : meetingId && roomCode ? roomCode : '없음'}
           </p>
@@ -215,13 +116,172 @@ export default function VoterRosterPanel({ eventId, activePoll, presenceCount }:
           </div>
         </div>
       </div>
+
       {notice && (
         <p className={`text-sm ${notice.tone === 'ok' ? 'text-green-600' : 'text-red-500'}`}>{notice.text}</p>
       )}
+
+      <div className="space-y-2 border-t border-gray-100 pt-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700">이번 모임 입장 ({checkins.length}명)</h3>
+          <span className="text-xs text-gray-400">기기당 1개 번호</span>
+        </div>
+        {checkins.length === 0 ? (
+          <p className="text-sm text-gray-400">아직 입장한 기기가 없습니다.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto">
+            {checkins.map((checkin) => (
+              <div
+                key={checkin.id}
+                className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2"
+              >
+                <span className="font-semibold text-sm text-gray-800 tabular-nums">
+                  {checkin.badge ? `${checkin.badge}번` : checkin.voterName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleReleaseCheckin(checkin)}
+                  disabled={releasingId === checkin.id}
+                  className="text-xs text-red-500 disabled:opacity-40"
+                >
+                  {releasingId === checkin.id ? '해제 중' : '해제'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-100 pt-3">
+        <button
+          type="button"
+          onClick={() => setShowRoster((prev) => !prev)}
+          className="text-xs font-medium text-gray-500 hover:text-gray-700 underline"
+        >
+          {showRoster ? '명단·출석 세션 관리 닫기 (선택)' : '명단·출석 세션 관리 열기 (장로 선출 등 선택 사항)'}
+        </button>
+        {showRoster && (
+          <div className="mt-4">
+            <OptionalRosterSection eventId={eventId} activePoll={activePoll} onNotice={setNotice} />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function OptionalRosterSection({
+  eventId,
+  activePoll,
+  onNotice,
+}: {
+  eventId: string;
+  activePoll: Poll | null;
+  onNotice: (notice: { text: string; tone: 'ok' | 'error' } | null) => void;
+}) {
+  const { voters } = useRosterDirectory(true);
+  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [namesText, setNamesText] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'attendanceSessions'), (snap) => {
+      setSessions(
+        snap.docs
+          .map((sessionDoc) => ({ id: sessionDoc.id, ...sessionDoc.data() }) as AttendanceSession)
+          .filter(
+            (session) =>
+              session.eventId === eventId && session.status === 'active' && session.expiresAt > Date.now(),
+          ),
+      );
+    });
+    return unsub;
+  }, [eventId]);
+
+  const parsedNames = parseRosterNames(namesText);
+
+  const addVoters = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const existing = new Set(voters.map((voter) => voter.name.trim()));
+    const fresh = parsedNames.filter((voterName) => !existing.has(voterName));
+    const skipped = parsedNames.length - fresh.length;
+    if (fresh.length === 0) {
+      onNotice({
+        text: parsedNames.length === 0 ? '이름을 입력해 주세요.' : '입력한 이름은 이미 명단에 있습니다.',
+        tone: 'error',
+      });
+      return;
+    }
+
+    setAdding(true);
+    onNotice(null);
+    try {
+      const now = Date.now();
+      for (let offset = 0; offset < fresh.length; offset += 400) {
+        const batch = writeBatch(db);
+        fresh.slice(offset, offset + 400).forEach((voterName) => {
+          const voterRef = doc(collection(db, 'voters'));
+          batch.set(voterRef, {
+            name: voterName,
+            externalQrId: '',
+            active: true,
+            createdAt: now,
+          });
+          batch.set(doc(db, 'voterDirectory', voterRef.id), {
+            name: voterName,
+            active: true,
+            createdAt: now,
+          });
+        });
+        await batch.commit();
+      }
+      setNamesText('');
+      onNotice({
+        text:
+          skipped > 0
+            ? `${fresh.length}명을 추가했습니다. 이미 있는 이름 ${skipped}명은 건너뛰었습니다.`
+            : `${fresh.length}명을 추가했습니다.`,
+        tone: 'ok',
+      });
+    } catch (err) {
+      onNotice({ text: err instanceof Error ? err.message : '명단을 추가하지 못했습니다.', tone: 'error' });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const createSession = async (voter: Voter) => {
+    setLoadingId(voter.id);
+    try {
+      await createAttendanceSession(voter, eventId);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const hasActiveSession = (voterId: string) => sessions.some((session) => session.voterId === voterId);
+
+  const removeVoter = async (voter: Voter) => {
+    if (!confirm(`"${voter.name}" 님을 명단에서 제거할까요?`)) return;
+    setRemovingId(voter.id);
+    onNotice(null);
+    try {
+      await removeVoterFromRoster(voter.id, activePoll);
+    } catch (err) {
+      onNotice({ text: err instanceof Error ? err.message : '명단에서 제거하지 못했습니다.', tone: 'error' });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
       <div>
-        <h2 className="font-bold text-gray-800">명단</h2>
+        <h3 className="font-bold text-gray-800">명단 (QR 출석 인증용)</h3>
         <p className="text-sm text-gray-400 mt-1">
-          한 줄에 한 명씩 붙여 넣으면 함께 등록됩니다. 잘못 넣은 이름은 명단에서 제거할 수 있습니다.
+          일반 현장 입장 투표에는 명단이 필요하지 않습니다. 출석 세션이 필요한 투표에만 사용하세요.
         </p>
       </div>
 
@@ -264,37 +324,6 @@ export default function VoterRosterPanel({ eventId, activePoll, presenceCount }:
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span
-                  className={`text-xs ${
-                    claimedIds.has(voter.id) ? 'text-green-600' : reissueIds.has(voter.id) ? 'text-accent' : 'text-gray-400'
-                  }`}
-                >
-                  {claimedIds.has(voter.id)
-                    ? `입장함${badgeByVoterId.get(voter.id) ? ` · ${badgeByVoterId.get(voter.id)}번` : ''}`
-                    : reissueIds.has(voter.id)
-                      ? '새 기기 연결 대기'
-                      : '미입장'}
-                </span>
-                {claimedIds.has(voter.id) && (
-                  <button
-                    type="button"
-                    onClick={() => reissueClaim(voter)}
-                    disabled={reissuingId === voter.id}
-                    className="text-xs text-primary disabled:opacity-40"
-                  >
-                    {reissuingId === voter.id ? '처리 중' : '다시 연결(재발급)'}
-                  </button>
-                )}
-                {(claimedIds.has(voter.id) || reissueIds.has(voter.id)) && (
-                  <button
-                    type="button"
-                    onClick={() => releaseClaim(voter)}
-                    disabled={releasingId === voter.id}
-                    className="text-xs text-red-500 disabled:opacity-40"
-                  >
-                    {releasingId === voter.id ? '해제 중' : '입장 해제'}
-                  </button>
-                )}
                 <span className={`text-xs ${active ? 'text-green-600' : 'text-gray-400'}`}>
                   {active ? '출석 세션 있음' : '미출석'}
                 </span>
@@ -343,7 +372,7 @@ export default function VoterRosterPanel({ eventId, activePoll, presenceCount }:
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

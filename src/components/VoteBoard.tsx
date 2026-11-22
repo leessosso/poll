@@ -13,7 +13,7 @@ interface VoteBoardProps {
 }
 
 export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
-  const { polls, loading: pollsLoading } = usePolls('voter');
+  const { polls, loading: pollsLoading } = usePolls('voter', { tallyScope: 'today' });
   const { lamps, loading: lampsLoading, error } = useBoardLamps();
   const loading = pollsLoading || lampsLoading;
   const view = boardView(polls, lamps);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, getDocs, limit, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { checkinId } from '../lib/meeting';
 import { clearRosterClaim, loadRosterClaim, storeRosterClaim } from '../lib/session-storage';
@@ -9,6 +9,7 @@ import type { RosterClaim } from '../types';
 interface UseRosterClaimResult {
   claim: RosterClaim | null;
   ready: boolean;
+  meetingOpen: boolean;
   /** 저장된 입장이 지난 모임 것이라 해제됐는지. 다음 투표 안내를 보여 줄 때 쓴다. */
   clearedStaleClaim: boolean;
   saveClaim: (claim: RosterClaim) => void;
@@ -31,9 +32,9 @@ function claimFromCheckin(data: Record<string, unknown>): RosterClaim | null {
 
 /**
  * 이 기기의 현장 입장.
- * - 브라우저에 저장된 입장이 있으면 서버 문서와 맞는지 계속 확인한다.
- * - 저장된 입장이 없어도 같은 익명 계정이 현재 모임에 입장해 있으면 자동으로 다시 연결한다.
- * - 관리자가 다시 연결(재발급)로 회수하면 이 기기의 입장은 풀린다.
+ * - checkins/{meetingId}_{authUid} 단일 문서만 구독해 서버 상태와 맞춘다(1읽기).
+ * - localStorage가 비어 있어도 같은 익명 계정이 현재 모임에 입장해 있으면 자동으로 복원한다.
+ * - 새 모임이 시작되거나 관리자가 입장 해제(revoked)하면 이 기기의 입장은 풀린다.
  */
 export function useRosterClaim(): UseRosterClaimResult {
   const { meetingId, loading: meetingLoading } = useCurrentMeeting();
@@ -42,7 +43,7 @@ export function useRosterClaim(): UseRosterClaimResult {
   const uid = auth.currentUser?.uid ?? '';
   const stored = state.claim;
   const current = stored && stored.meetingId === meetingId ? stored : null;
-  const key = `${meetingId}:${uid}:${current?.claimToken ?? ''}`;
+  const key = `${meetingId}:${uid}`;
 
   // 저장된 입장이 지난 모임 것이면 버린다.
   useEffect(() => {
@@ -50,67 +51,40 @@ export function useRosterClaim(): UseRosterClaimResult {
     clearRosterClaim();
   }, [meetingLoading, meetingId, stored]);
 
-  // 저장된 입장을 서버의 본인 입장 문서와 맞춰 본다.
+  // 현재 모임의 본인 입장 문서 1개만 구독한다.
   useEffect(() => {
-    if (meetingLoading || !current || !uid) return;
+    if (meetingLoading || !meetingId || !uid) return;
+    const expectedKey = `${meetingId}:${uid}`;
     return onSnapshot(
-      doc(db, 'checkins', checkinId(current.meetingId, uid)),
+      doc(db, 'checkins', checkinId(meetingId, uid)),
       (snap) => {
         const data = snap.exists() ? snap.data() : null;
-        if (!data || data.revoked !== false || data.claimToken !== current.claimToken) {
+        if (!data || data.revoked !== false) {
           clearRosterClaim();
-          setState({ claim: null, checkedKey: null });
+          setState({ claim: null, checkedKey: expectedKey });
           return;
         }
         const next = claimFromCheckin(data);
-        if (next && next.badge !== current.badge) storeRosterClaim(next);
-        setState({ claim: next ?? current, checkedKey: `${meetingId}:${uid}:${current.claimToken}` });
+        if (!next) {
+          clearRosterClaim();
+          setState({ claim: null, checkedKey: expectedKey });
+          return;
+        }
+        storeRosterClaim(next);
+        setClearedStaleClaim(false);
+        setState({ claim: next, checkedKey: expectedKey });
       },
       () => {
         clearRosterClaim();
-        setState({ claim: null, checkedKey: null });
+        setState({ claim: null, checkedKey: expectedKey });
       },
     );
-    // current 는 claimToken 으로 대표된다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingLoading, meetingId, uid, current?.claimToken]);
-
-  // 저장된 입장이 없으면 같은 계정의 현재 모임 입장을 찾아 자동으로 다시 연결한다.
-  useEffect(() => {
-    if (meetingLoading || current || !uid || !meetingId) return;
-    let cancelled = false;
-    getDocs(
-      query(
-        collection(db, 'checkins'),
-        where('meetingId', '==', meetingId),
-        where('authUid', '==', uid),
-        where('revoked', '==', false),
-        limit(1),
-      ),
-    )
-      .then((snap) => {
-        if (cancelled) return;
-        const found = snap.empty ? null : claimFromCheckin(snap.docs[0].data());
-        if (found) {
-          storeRosterClaim(found);
-          setClearedStaleClaim(false);
-          setState({ claim: found, checkedKey: null });
-        } else {
-          setState({ claim: null, checkedKey: `${meetingId}:${uid}:` });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setState({ claim: null, checkedKey: `${meetingId}:${uid}:` });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [meetingLoading, meetingId, uid, current]);
+  }, [meetingLoading, meetingId, uid]);
 
   const saveClaim = (next: RosterClaim) => {
     storeRosterClaim(next);
     setClearedStaleClaim(false);
-    setState({ claim: next, checkedKey: null });
+    setState((prev) => ({ claim: next, checkedKey: prev.checkedKey }));
   };
 
   // 모임이 아직 없으면 확인할 입장도 없다.
@@ -119,5 +93,11 @@ export function useRosterClaim(): UseRosterClaimResult {
   if (isStale && !clearedStaleClaim) {
     setClearedStaleClaim(true);
   }
-  return { claim: current, ready, clearedStaleClaim, saveClaim };
+  return {
+    claim: current,
+    ready,
+    meetingOpen: Boolean(meetingId),
+    clearedStaleClaim,
+    saveClaim,
+  };
 }

@@ -23,7 +23,7 @@ import PollParticipationPanel from '../components/PollParticipationPanel';
 import VoteBoard from '../components/VoteBoard';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
-import { useRosterDirectory } from '../hooks/useRosterDirectory';
+import { useMeetingCheckins } from '../hooks/useMeetingCheckins';
 import AdminHeadcountBadge from '../components/AdminHeadcountBadge';
 import HeadcountPanel, { StartHeadcountDialog } from '../components/HeadcountPanel';
 
@@ -246,7 +246,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const { presenceCount, visitorCount, ready: statsReady } = usePresenceStats(refreshKey);
-  const { checkins, loading: rosterLoading } = useRosterDirectory('admin', refreshKey);
+  const { checkins, loading: checkinsLoading } = useMeetingCheckins(refreshKey);
   const [showCreate, setShowCreate] = useState(false);
   const [openingPoll, setOpeningPoll] = useState<Poll | null>(null);
   const [opening, setOpening] = useState(false);
@@ -256,11 +256,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!refreshing) return;
-    if (statsReady && !rosterLoading) {
+    if (statsReady && !checkinsLoading) {
       setRefreshing(false);
       setUpdatedAt(Date.now());
     }
-  }, [refreshing, statsReady, rosterLoading]);
+  }, [refreshing, statsReady, checkinsLoading]);
 
   const activePoll = polls.find((p) => p.status === 'active');
   const waitingPolls = polls.filter((p) => p.status === 'waiting');
@@ -374,7 +374,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         <VoteBoard layout="panel" />
 
-        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} presenceCount={presenceCount} />
+        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} presenceCount={presenceCount} checkins={checkins} />
 
         {waitingPolls.length > 0 && (
           <section>
