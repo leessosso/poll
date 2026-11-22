@@ -1,3 +1,4 @@
+import { RESULT_TWO_COL_FROM } from '../lib/board-fit';
 import { getOptions, getPollTotal } from '../lib/poll-utils';
 import type { Poll } from '../types';
 
@@ -9,8 +10,11 @@ export default function ResultsBar({ poll }: ResultsBarProps) {
   const options = getOptions(poll);
   const total = getPollTotal(poll);
 
+  const columns = options.length >= RESULT_TWO_COL_FROM ? 2 : 1;
+
   return (
     <div className="space-y-3">
+      <div className={columns === 2 ? 'grid grid-cols-2 gap-x-3 gap-y-2' : 'space-y-3'}>
       {options.map((option) => {
         const count = poll.results[option] ?? 0;
         const percent = total > 0 ? Math.round((count / total) * 100) : 0;
@@ -26,9 +30,9 @@ export default function ResultsBar({ poll }: ResultsBarProps) {
             : 'bg-primary';
 
         return (
-          <div key={option}>
+          <div key={option} className="min-w-0">
             <div className="flex justify-between text-sm font-medium mb-1">
-              <span className="text-gray-700">{option}</span>
+              <span className="truncate text-gray-700">{option}</span>
               <span className="text-gray-500">
                 {count}표 ({percent}%)
               </span>
@@ -42,6 +46,7 @@ export default function ResultsBar({ poll }: ResultsBarProps) {
           </div>
         );
       })}
+      </div>
       <p className="text-xs text-gray-400 text-right pt-1">총 {total}명 참여</p>
     </div>
   );
