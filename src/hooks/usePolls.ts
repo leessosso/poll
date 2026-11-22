@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePageVisibleGeneration } from './usePageVisible';
 import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getTodayKST } from '../lib/kst-date';
@@ -31,6 +32,7 @@ export function usePolls(
   options: UsePollsOptions = {},
 ): { polls: Poll[]; loading: boolean } {
   const tallyScope = options.tallyScope ?? 'all';
+  const visibleGeneration = usePageVisibleGeneration();
   const [polls, setPolls] = useState<Poll[]>([]);
   const [tallies, setTallies] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
@@ -47,7 +49,7 @@ export function usePolls(
       setPolls(snap.docs.map(mapPoll));
       setLoading(false);
     });
-  }, [audience]);
+  }, [audience, visibleGeneration]);
 
   useEffect(() => {
     if (!tallyKey) return;

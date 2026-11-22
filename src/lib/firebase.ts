@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
@@ -16,5 +16,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// 사파리 등에서 WebChannel Listen 이 멈추면 롱 폴링으로 넘어가게 한다.
+export const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 export const rtdb = getDatabase(app);
