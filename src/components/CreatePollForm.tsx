@@ -145,7 +145,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
                     : 'bg-surface text-muted border-border'
                 }`}
               >
-                현장 명단 (이름 선택)
+                현장 입장 (입장 코드)
               </button>
               <button
                 type="button"
@@ -202,7 +202,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
 
           {type === 'yesno' && eligibilityMode === 'roster' && (
             <p className="text-sm text-gray-500">
-              시작 전까지 이름을 선택한 사람이 투표 인원입니다. 제한시간까지 선택하지 않은 사람은 기권으로 집계되고, 누가 무엇을 골랐는지는 저장되지 않습니다.
+              시작 전까지 입장 코드로 들어온 기기가 이번 투표 대상입니다. 제한시간까지 선택하지 않은 표는 기권으로 집계되고, 누가 무엇을 골랐는지는 저장되지 않습니다.
             </p>
           )}
 

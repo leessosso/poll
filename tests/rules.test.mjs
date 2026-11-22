@@ -177,33 +177,35 @@ describe('firestore rules', () => {
     await assertFails(deleteDoc(doc(voter(), 'voters/v1')));
   });
 
-  test('현장 입장은 비어 있는 이름에만 가능하고 선택 필드는 거부한다', async () => {
+  test('명단 없이 코드만으로 입장하고 기기당 1번만 허용하며 변조·선택 필드는 거부한다', async () => {
     await seedMeeting();
-    await seedVoters();
 
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417 }));
-    // 같은 이름은 다른 기기가 잡지 못한다.
-    await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'v1', badge: 418 }));
-    // 같은 번호도 다른 사람이 잡지 못한다.
-    await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'v2', name: '이영희', badge: 417 }));
+    // 명단(voters)이 비어 있어도 코드만 맞으면 입장한다.
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+    // 같은 기기(uid)는 한 모임에서 두 번 입장하지 못한다.
+    await assertFails(claim(voter(), 'voter-1', { badge: 418 }));
+    // 다른 사람 uid 를 사칭하거나 이름 형식을 바꾸면 거부한다.
+    await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'voter-1', name: '418번', badge: 418 }));
+    await assertFails(claim(voter('voter-2'), 'voter-2', { name: '홍길동', badge: 418 }));
+    // 같은 번호는 다른 기기가 잡지 못한다.
+    await assertFails(claim(voter('voter-2'), 'voter-2', { badge: 417 }));
     // 선택값 필드는 거부한다.
-    await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'v2', name: '이영희', badge: 418, extra: { choice: '찬성' } }));
-    // 한 기기는 한 이름만 잡는다.
-    await assertFails(claim(voter(), 'voter-1', { voterId: 'v2', name: '이영희', badge: 419 }));
-    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { voterId: 'v2', name: '이영희', badge: 418 }));
+    await assertFails(claim(voter('voter-2'), 'voter-2', { badge: 418, extra: { choice: '찬성' } }));
+    // 현황판 문서 없이 입장 문서만 만들 수 없다.
+    await assertFails(setDoc(doc(voter('voter-2'), `checkins/${MID}_voter-2`), checkinBody('voter-2', { badge: 418 })));
+    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { badge: 418 }));
   });
 
   test('입장 코드는 규칙이 확인하고 코드 원문과 입장 문서는 관리자만 읽는다', async () => {
     await seedMeeting();
-    await seedVoters();
 
     // 틀린 코드, 지난 모임 코드, 다른 모임 id 는 거부한다.
-    await assertFails(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417, code: '000000' }));
+    await assertFails(claim(voter(), 'voter-1', { badge: 417, code: '000000' }));
     await seed(async (db) => {
       await setDoc(doc(db, 'entryCodes/' + codeHash(MID2, CODE)), { meetingId: MID2, createdAt: 1 });
     });
-    await assertFails(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417, mid: MID2 }));
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417 }));
+    await assertFails(claim(voter(), 'voter-1', { badge: 417, mid: MID2 }));
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
 
     // 코드 원문(meeting)과 해시 문서는 투표자가 읽지 못한다. 모임 id 만 공개된다.
     await assertFails(getDoc(doc(voter(), 'meeting/current')));
@@ -212,33 +214,20 @@ describe('firestore rules', () => {
     await assertFails(getDocs(collection(voter(), 'entryCodes')));
     await assertSucceeds(getDoc(doc(voter('voter-2'), 'meetingPublic/current')));
 
-    // 입장 문서(이름·번호·uid)는 관리자와 본인만 읽는다.
+    // 입장 문서(번호·uid)는 관리자와 본인만 읽는다.
     await assertFails(getDocs(collection(voter('voter-2'), 'checkins')));
     await assertFails(getDoc(doc(voter('voter-2'), `checkins/${MID}_voter-1`)));
     await assertSucceeds(getDoc(doc(voter(), `checkins/${MID}_voter-1`)));
-    const own = await assertSucceeds(getDocs(query(
-      collection(voter(), 'checkins'),
-      where('meetingId', '==', MID),
-      where('authUid', '==', 'voter-1'),
-      where('revoked', '==', false),
-    )));
-    assert.equal(own.size, 1);
     await assertSucceeds(getDocs(collection(admin(), 'checkins')));
 
-    // 이름 선점 문서는 공개지만 uid·번호·이름이 없다.
-    const taken = await assertSucceeds(getDoc(doc(voter('voter-2'), `claimedNames/${MID}_v1`)));
-    assert.deepEqual(Object.keys(taken.data()).sort(), ['meetingId', 'reissue']);
-    // 입장 없이 이름 선점 문서만 만들 수는 없다.
-    await assertFails(setDoc(doc(voter('voter-2'), `claimedNames/${MID}_v2`), { meetingId: MID, reissue: false }));
     // 현황판 번호 문서에는 유권자 정보가 없다.
     const lamp = await assertSucceeds(getDoc(doc(voter('voter-2'), `lamps/${MID}_417`)));
     assert.deepEqual(Object.keys(lamp.data()).sort(), ['badge', 'meetingId', 'pollId', 'state']);
   });
 
-  test('새 모임을 열면 지난 모임 입장은 무시되고 같은 이름을 다시 고를 수 있다', async () => {
+  test('새 모임을 열면 지난 모임 입장은 무시되고 같은 기기도 새 코드로 다시 입장한다', async () => {
     await seedMeeting();
-    await seedVoters();
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417 }));
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
 
     // 관리자가 새 모임을 연다. 예전 문서는 지우지 않는다.
     const now = Date.now();
@@ -251,54 +240,100 @@ describe('firestore rules', () => {
     await assertSucceeds(batch.commit());
 
     // 지난 모임 코드로는 더 입장하지 못한다.
-    await assertFails(claim(voter('voter-2'), 'voter-2', { voterId: 'v2', name: '이영희', badge: 500 }));
-    // 지난 모임에서 잡은 이름과 번호도 새 모임에서는 비어 있다.
-    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { voterId: 'v1', badge: 417, mid: MID2, code: '777777' }));
+    await assertFails(claim(voter('voter-2'), 'voter-2', { badge: 500 }));
+    // 같은 기기(voter-1)도 새 모임에서는 새 코드로 다시 입장한다.
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417, mid: MID2, code: '777777' }));
     const old = await assertSucceeds(getDoc(doc(admin(), `checkins/${MID}_voter-1`)));
-    assert.equal(old.data().voterId, 'v1');
+    assert.equal(old.data().voterId, 'voter-1');
 
     // 새 모임 투표에는 지난 모임 입장으로 투표하지 못한다.
     await seed(async (sdb) => {
       await setDoc(doc(sdb, 'polls/poll1'), pollData({ meetingId: MID2 }));
       await setDoc(doc(sdb, 'polls/poll1/tally/current'), counts());
-      await setDoc(doc(sdb, 'polls/poll1/participation/v1'), { voterId: 'v1', voterName: '김철수', status: 'pending', createdAt: 1 });
+      await setDoc(doc(sdb, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
+      await setDoc(doc(sdb, 'polls/poll1/participation/voter-2'), { voterId: 'voter-2', voterName: '418번', status: 'pending', createdAt: 1 });
     });
-    await assertFails(rosterVote(voter(), 'voter-1', '찬성'));
-    await assertSucceeds(rosterVote(voter('voter-2'), 'voter-2', '찬성'));
+    await assertFails(rosterVote(voter('voter-2'), 'voter-2', '찬성'));
+    await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성'));
   });
 
-  test('다시 연결은 같은 번호로 새 기기에 넘기고 투표한 사람은 다시 투표하지 못한다', async () => {
+  test('입장 해제 뒤 회수된 기기는 투표하지 못하고 새 코드로 다시 입장할 수 있다', async () => {
     await seedMeeting();
-    await seedVoters();
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417 }));
-    await seed(async (db) => {
-      await setDoc(doc(db, 'polls/poll1'), pollData({ meetingId: MID }));
-      await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
-      await setDoc(doc(db, 'polls/poll1/participation/v1'), { voterId: 'v1', voterName: '김철수', status: 'pending', createdAt: 1 });
-      await setDoc(doc(db, `lamps/${MID}_417`), { meetingId: MID, badge: 417, state: 'pending', pollId: 'poll1' });
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+    await seed(async (sdb) => {
+      await setDoc(doc(sdb, 'polls/poll1'), pollData({ meetingId: MID }));
+      await setDoc(doc(sdb, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(sdb, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
+      await setDoc(doc(sdb, `lamps/${MID}_417`), { meetingId: MID, badge: 417, state: 'pending', pollId: 'poll1' });
     });
 
-    // 재연결이 열리기 전에는 새 기기가 이름을 가져가지 못한다.
-    await assertFails(claim(voter('voter-new'), 'voter-new', { voterId: 'v1', badge: 417, reclaim: true }));
-    // 투표자는 재연결을 열지 못한다.
-    await assertFails(updateDoc(doc(voter('voter-2'), `claimedNames/${MID}_v1`), { reissue: true }));
-    await assertFails(updateDoc(doc(voter(), `claimedNames/${MID}_v1`), { reissue: true }));
-    await assertSucceeds(reissue(admin(), 'v1', 417));
+    // 관리자는 입장 문서의 회수 표시만 바꾼다. uid 나 번호는 바꾸지 못한다.
+    await assertFails(updateDoc(doc(admin(), `checkins/${MID}_voter-1`), { voterId: 'v2' }));
+    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: true, badge: 500 }));
+    // 앱의 입장 해제와 같은 쓰기
+    const db = admin();
+    const batch = writeBatch(db);
+    batch.update(doc(db, `checkins/${MID}_voter-1`), { revoked: true });
+    batch.delete(doc(db, `lamps/${MID}_417`));
+    batch.delete(doc(db, 'polls/poll1/participation/voter-1'));
+    await assertSucceeds(batch.commit());
 
-    // 회수된 옛 기기는 투표하지 못한다.
+    // 회수된 기기는 투표하지 못한다.
     await assertFails(rosterVote(voter(), 'voter-1', '찬성'));
-    // 새 기기는 관리자가 정한 번호로만 받는다.
-    await assertFails(claim(voter('voter-new'), 'voter-new', { voterId: 'v1', badge: 418, reclaim: true }));
-    await assertSucceeds(claim(voter('voter-new'), 'voter-new', { voterId: 'v1', badge: 417, reclaim: true }));
-    // 참여 기록은 그대로라 새 기기로 투표하고 번호도 켠다.
-    const part = await assertSucceeds(getDoc(doc(admin(), 'polls/poll1/participation/v1')));
-    assert.equal(part.data().status, 'pending');
-    await assertSucceeds(rosterVote(voter('voter-new'), 'voter-new', '찬성', { lamp: `lamps/${MID}_417` }));
+    // 같은 기기가 다시 입장할 수 있다. 다른 기기는 이 입장 문서를 덮어쓰지 못한다.
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 420 }));
+    await assertFails(setDoc(doc(voter('voter-2'), `checkins/${MID}_voter-1`), checkinBody('voter-2', { badge: 421 })));
+  });
 
-    // 이미 투표한 사람을 또 다른 기기로 넘겨도 다시 투표하지 못한다.
-    await assertSucceeds(reissue(admin(), 'v1', 417, 'voter-new'));
-    await assertSucceeds(claim(voter('voter-third'), 'voter-third', { voterId: 'v1', badge: 417, reclaim: true }));
-    await assertFails(rosterVote(voter('voter-third'), 'voter-third', '반대'));
+  test('투표자는 본인 입장만 퇴장하고 번호는 비우며 같은 코드로 다시 입장할 수 있다', async () => {
+    await seedMeeting();
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+    await assertSucceeds(claim(voter('voter-2'), 'voter-2', { badge: 418 }));
+
+    // 본인 입장만, 그리고 같은 쓰기에서 본인 번호만 지운다.
+    await assertFails(selfExit(voter(), 'voter-1', 417, { alsoRevoke: false }));
+    await assertFails(selfExit(voter(), 'voter-1', 417, { alsoDeleteLamp: false }));
+    await assertFails(selfExit(voter(), 'voter-1', 418));
+    await assertFails(selfExit(voter(), 'voter-2', 418));
+    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: true, badge: 500 }));
+    await assertSucceeds(selfExit(voter(), 'voter-1', 417));
+
+    const mine = await assertSucceeds(getDoc(doc(voter(), `checkins/${MID}_voter-1`)));
+    assert.equal(mine.data().revoked, true);
+    const lamp = await assertSucceeds(getDoc(doc(voter('voter-2'), `lamps/${MID}_417`)));
+    assert.equal(lamp.exists(), false);
+    // 다른 기기의 입장은 그대로다.
+    const other = await assertSucceeds(getDoc(doc(admin(), `checkins/${MID}_voter-2`)));
+    assert.equal(other.data().revoked, false);
+    const otherLamp = await assertSucceeds(getDoc(doc(voter(), `lamps/${MID}_418`)));
+    assert.equal(otherLamp.exists(), true);
+
+    // 회수만 되돌리거나, 이미 퇴장한 뒤로 다른 번호를 지우지는 못한다.
+    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: false }));
+    await assertFails(deleteDoc(doc(voter(), `lamps/${MID}_418`)));
+
+    // 같은 기기는 입장 코드로 다시 들어온다. 비워 둔 번호를 다시 쓸 수 있다.
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 417 }));
+  });
+
+  test('퇴장 뒤 다시 입장해도 이미 투표한 기기는 같은 투표에 다시 투표하지 못한다', async () => {
+    await seedMeeting();
+    await seedRoster();
+    await seed(async (db) => {
+      await setDoc(doc(db, `lamps/${MID}_417`), { meetingId: MID, badge: 417, state: 'pending', pollId: 'poll1' });
+    });
+    await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성', { lamp: `lamps/${MID}_417` }));
+    await assertSucceeds(selfExit(voter(), 'voter-1', 417));
+    await assertSucceeds(claim(voter(), 'voter-1', { badge: 421 }));
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/poll1/participation/voter-1'), {
+        voterId: 'voter-1',
+        voterName: '421번',
+        status: 'pending',
+        createdAt: 1,
+      });
+    });
+    await assertFails(rosterVote(voter(), 'voter-1', '반대'));
     let tally;
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       tally = (await getDoc(doc(ctx.firestore(), 'polls/poll1/tally/current'))).data();
@@ -306,34 +341,15 @@ describe('firestore rules', () => {
     assert.deepEqual(tally.counts, { 찬성: 1, 반대: 0, 기권: 0 });
   });
 
-  test('입장 해제 뒤 같은 기기로 다시 입장하고 관리자는 회수만 한다', async () => {
-    await seedMeeting();
-    await seedVoters();
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v1', badge: 417 }));
-    // 관리자는 입장 문서의 회수 표시만 바꾼다. 이름이나 uid 는 바꾸지 못한다.
-    await assertFails(updateDoc(doc(admin(), `checkins/${MID}_voter-1`), { voterId: 'v2' }));
-    await assertFails(updateDoc(doc(voter(), `checkins/${MID}_voter-1`), { revoked: true, badge: 500 }));
-    // 앱의 입장 해제와 같은 쓰기
-    const db = admin();
-    const batch = writeBatch(db);
-    batch.update(doc(db, `checkins/${MID}_voter-1`), { revoked: true });
-    batch.delete(doc(db, `claimedNames/${MID}_v1`));
-    batch.delete(doc(db, `lamps/${MID}_417`));
-    await assertSucceeds(batch.commit());
-    // 같은 기기가 다른 이름으로 다시 입장할 수 있다. 다른 기기는 이 입장 문서를 덮어쓰지 못한다.
-    await assertSucceeds(claim(voter(), 'voter-1', { voterId: 'v2', name: '이영희', badge: 420 }));
-    await assertFails(setDoc(doc(voter('voter-2'), `checkins/${MID}_voter-1`), checkinBody('voter-2', { voterId: 'v1', badge: 421 })));
-  });
-
-  test('명단 투표는 한 칸만 올리고 참여 문서에 선택을 남기지 않는다', async () => {
+  test('현장 입장 투표는 한 칸만 올리고 참여 문서에 선택을 남기지 않는다', async () => {
     await seedRoster();
 
     await assertFails(rosterVote(voter('voter-2'), 'voter-2', '찬성'));
     await assertSucceeds(rosterVote(voter(), 'voter-1', '찬성'));
     await assertFails(rosterVote(voter(), 'voter-1', '반대'));
     await assertFails(getDocs(collection(voter(), 'polls/poll1/participation')));
-    await assertSucceeds(getDoc(doc(voter(), 'polls/poll1/participation/v1')));
-    // 없는 참여 문서는 '명단에 없음'으로 읽힌다.
+    await assertSucceeds(getDoc(doc(voter(), 'polls/poll1/participation/voter-1')));
+    // 없는 참여 문서는 '대상 아님'으로 읽힌다.
     const missing = await assertSucceeds(getDoc(doc(voter(), 'polls/poll1/participation/nobody')));
     assert.equal(missing.exists(), false);
   });
@@ -342,18 +358,18 @@ describe('firestore rules', () => {
     await seedRoster();
     const db = voter();
     await assertFails(runTransaction(db, async (tx) => {
-      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+      tx.update(doc(db, 'polls/poll1/participation/voter-1'), {
         status: 'completed',
         completedAt: Date.now(),
         choice: '찬성',
       });
       tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), { 'counts.찬성': increment(1) });
-      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1' });
     }));
 
     await assertFails(runTransaction(db, async (tx) => {
-      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+      tx.update(doc(db, 'polls/poll1/participation/voter-1'), {
         status: 'completed',
         completedAt: Date.now(),
       });
@@ -362,11 +378,11 @@ describe('firestore rules', () => {
         'counts.찬성': increment(1),
         'counts.반대': increment(1),
       });
-      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1' });
     }));
 
     await assertFails(runTransaction(db, async (tx) => {
-      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+      tx.update(doc(db, 'polls/poll1/participation/voter-1'), {
         status: 'completed',
         completedAt: Date.now(),
       });
@@ -374,20 +390,20 @@ describe('firestore rules', () => {
       tx.update(doc(db, 'polls/poll1/tally/current'), {
         'counts.찬성': increment(2),
       });
-      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1' });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1' });
     }));
 
     await assertFails(runTransaction(db, async (tx) => {
-      tx.update(doc(db, 'polls/poll1/participation/v1'), {
+      tx.update(doc(db, 'polls/poll1/participation/voter-1'), {
         status: 'completed',
         completedAt: Date.now(),
       });
       tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), {
         'counts.찬성': increment(1),
-        voterId: 'v1',
+        voterId: 'voter-1',
       });
-      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'v1', choice: '찬성' });
+      tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1', choice: '찬성' });
     }));
   });
 
@@ -436,15 +452,14 @@ describe('firestore rules', () => {
 
   test('현황판 번호는 본인 입장으로만 만들고 투표한 뒤에만 켜진다', async () => {
     await seedMeeting();
-    await seedVoters();
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll1'), pollData({ meetingId: MID }));
       await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
-      await setDoc(doc(db, 'polls/poll1/participation/v1'), { voterId: 'v1', voterName: '김철수', status: 'pending', createdAt: 1 });
+      await setDoc(doc(db, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
     });
 
     const owner = voter();
-    await assertSucceeds(claim(owner, 'voter-1', { voterId: 'v1', badge: 417 }));
+    await assertSucceeds(claim(owner, 'voter-1', { badge: 417 }));
     // 본인 입장 번호가 아닌 칸은 만들지 못한다.
     await assertFails(setDoc(doc(voter('voter-2'), `lamps/${MID}_500`), { meetingId: MID, badge: 500, state: 'seated', pollId: '' }));
     await assertFails(updateDoc(doc(owner, `lamps/${MID}_417`), { state: 'voted' }));
@@ -517,7 +532,7 @@ describe('firestore rules', () => {
     await assertFails(updateDoc(doc(voter(), 'polls/poll-cap'), { expectedCount: 9 }));
   });
 
-  test('투표자는 식별자가 있는 명단 문서를 읽지 못하고 공개 이름만 읽는다', async () => {
+  test('투표자는 명단(voters 및 voterDirectory)과 예전 선점 컬렉션을 읽지 못한다', async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'voters/v1'), {
         name: '김철수',
@@ -531,21 +546,28 @@ describe('firestore rules', () => {
         active: true,
         createdAt: 1,
       });
+      await setDoc(doc(db, `claimedNames/${MID}_v1`), {
+        meetingId: MID,
+        reissue: false,
+      });
     });
 
     await assertFails(getDoc(doc(voter(), 'voters/v1')));
     await assertFails(getDocs(collection(voter(), 'voters')));
-    const hidden = await assertSucceeds(getDoc(doc(admin(), 'voters/v1')));
-    assert.equal(hidden.data().externalQrId, 'qr-1');
-    assert.equal(hidden.data().memberNo, '12');
-    const visible = await assertSucceeds(getDoc(doc(voter(), 'voterDirectory/v1')));
-    assert.deepEqual(Object.keys(visible.data()).sort(), ['active', 'createdAt', 'name']);
-    await assertSucceeds(getDocs(collection(voter(), 'voterDirectory')));
+    await assertFails(getDoc(doc(voter(), 'voterDirectory/v1')));
+    await assertFails(getDocs(collection(voter(), 'voterDirectory')));
+    await assertFails(getDoc(doc(voter(), `claimedNames/${MID}_v1`)));
     await assertFails(setDoc(doc(voter(), 'voterDirectory/v2'), {
       name: '이영희',
       active: true,
       createdAt: 1,
     }));
+
+    const hidden = await assertSucceeds(getDoc(doc(admin(), 'voters/v1')));
+    assert.equal(hidden.data().externalQrId, 'qr-1');
+    assert.equal(hidden.data().memberNo, '12');
+    const dir = await assertSucceeds(getDoc(doc(admin(), 'voterDirectory/v1')));
+    assert.deepEqual(Object.keys(dir.data()).sort(), ['active', 'createdAt', 'name']);
   });
 
   test('results 필드가 없는 투표 목록은 인증된 사용자가 읽는다', async () => {
@@ -658,14 +680,7 @@ async function seedMeeting(mid = MID, code = CODE) {
   });
 }
 
-async function seedVoters() {
-  await seed(async (db) => {
-    await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
-    await setDoc(doc(db, 'voters/v2'), { name: '이영희', externalQrId: '', active: true, createdAt: 1 });
-  });
-}
-
-function checkinBody(uid, { voterId, name = '김철수', badge, code = CODE, mid = MID, extra = {} }) {
+function checkinBody(uid, { voterId = uid, badge, name = `${badge}번`, code = CODE, mid = MID, extra = {} }) {
   return {
     meetingId: mid,
     voterId,
@@ -680,27 +695,20 @@ function checkinBody(uid, { voterId, name = '김철수', badge, code = CODE, mid
   };
 }
 
-/** 앱의 claimRosterSeat 와 같은 쓰기. reclaim 이면 다시 연결 경로. */
+/** 앱의 exitOwnCheckin 과 같은 쓰기. */
+function selfExit(db, uid, badge, { alsoRevoke = true, alsoDeleteLamp = true, mid = MID } = {}) {
+  return runTransaction(db, async (tx) => {
+    if (alsoRevoke) tx.update(doc(db, `checkins/${mid}_${uid}`), { revoked: true });
+    if (alsoDeleteLamp) tx.delete(doc(db, `lamps/${mid}_${badge}`));
+  });
+}
+
+/** 앱의 claimRosterSeat 와 같은 쓰기 (코드 전용). */
 function claim(db, uid, opts) {
   const mid = opts.mid ?? MID;
   return runTransaction(db, async (tx) => {
     tx.set(doc(db, `checkins/${mid}_${uid}`), checkinBody(uid, opts));
-    if (opts.reclaim) {
-      tx.update(doc(db, `claimedNames/${mid}_${opts.voterId}`), { reissue: false });
-      tx.delete(doc(db, `reissues/${mid}_${opts.voterId}`));
-    } else {
-      tx.set(doc(db, `claimedNames/${mid}_${opts.voterId}`), { meetingId: mid, reissue: false });
-      tx.set(doc(db, `lamps/${mid}_${opts.badge}`), { meetingId: mid, badge: opts.badge, state: 'seated', pollId: '' });
-    }
-  });
-}
-
-/** 앱의 reissueRosterClaim 와 같은 쓰기. */
-function reissue(db, voterId, badge, ownerUid = 'voter-1', mid = MID) {
-  return runTransaction(db, async (tx) => {
-    tx.update(doc(db, `checkins/${mid}_${ownerUid}`), { revoked: true });
-    tx.update(doc(db, `claimedNames/${mid}_${voterId}`), { reissue: true });
-    tx.set(doc(db, `reissues/${mid}_${voterId}`), { meetingId: mid, voterId, badge, createdAt: Date.now() });
+    tx.set(doc(db, `lamps/${mid}_${opts.badge}`), { meetingId: mid, badge: opts.badge, state: 'seated', pollId: '' });
   });
 }
 
@@ -708,11 +716,10 @@ async function seedRoster() {
   await seed(async (db) => {
     await setDoc(doc(db, 'polls/poll1'), pollData({ meetingId: MID }));
     await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
-    await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
-    await setDoc(doc(db, `checkins/${MID}_voter-1`), checkinBody('voter-1', { voterId: 'v1', badge: 417 }));
-    await setDoc(doc(db, 'polls/poll1/participation/v1'), {
-      voterId: 'v1',
-      voterName: '김철수',
+    await setDoc(doc(db, `checkins/${MID}_voter-1`), checkinBody('voter-1', { badge: 417 }));
+    await setDoc(doc(db, 'polls/poll1/participation/voter-1'), {
+      voterId: 'voter-1',
+      voterName: '417번',
       status: 'pending',
       createdAt: 1,
     });
@@ -721,13 +728,13 @@ async function seedRoster() {
 
 function rosterVote(db, uid, choice, { lamp } = {}) {
   return runTransaction(db, async (tx) => {
-    tx.update(doc(db, 'polls/poll1/participation/v1'), {
+    tx.update(doc(db, `polls/poll1/participation/${uid}`), {
       status: 'completed',
       completedAt: Date.now(),
     });
     tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
     tx.update(doc(db, 'polls/poll1/tally/current'), { [`counts.${choice}`]: increment(1) });
-    tx.set(doc(db, `polls/poll1/voteGuards/${uid}`), { voterId: 'v1' });
+    tx.set(doc(db, `polls/poll1/voteGuards/${uid}`), { voterId: uid });
     if (lamp) tx.update(doc(db, lamp), { state: 'voted' });
   });
 }

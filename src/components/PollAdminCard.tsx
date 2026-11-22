@@ -55,7 +55,7 @@ export default function PollAdminCard({
               {poll.eligibilityMode === 'attendance'
                 ? 'QR 출석 인증'
                 : poll.eligibilityMode === 'roster'
-                  ? '현장 명단'
+                  ? '현장 입장'
                   : '누구나 참여'}{' '}
               · 총 {total}표
             </p>
