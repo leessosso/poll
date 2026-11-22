@@ -39,7 +39,7 @@ export default function BoardEntryQrModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative w-full max-w-[min(94vw,86rem)] overflow-hidden rounded-3xl border border-border bg-surface px-8 py-10 shadow-xl sm:px-12"
+        className="relative w-full max-w-[min(94vw,86rem)] overflow-hidden rounded-3xl border border-border bg-surface px-8 py-[clamp(1rem,3.2vh,2.5rem)] shadow-xl sm:px-12"
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id={titleId} className="text-center text-[clamp(2rem,3.2vw,3.5rem)] font-bold text-gray-900">
@@ -48,8 +48,11 @@ export default function BoardEntryQrModal({
         <p className="mt-3 text-center text-[clamp(1rem,1.6vw,1.5rem)] text-gray-500">
           휴대폰 카메라로 QR을 찍거나, 아래 주소로 들어와 주세요.
         </p>
+        <p className="mt-4 truncate px-2 text-center font-semibold text-primary text-[clamp(1.7rem,3.2vw,3rem)] leading-tight">
+          {entryUrl || ' '}
+        </p>
 
-        <div className="mt-8 flex flex-col items-center justify-center gap-10 xl:flex-row xl:gap-16">
+        <div className="mt-5 flex flex-col items-center justify-center gap-6 lg:flex-row lg:gap-16">
           <div className="flex flex-col items-center">
             {entryUrl ? (
               <div className={`rounded-2xl bg-white p-3 ${showCode ? 'w-[min(42vmin,24rem)]' : 'w-[min(52vmin,28rem)]'}`}>
@@ -69,9 +72,6 @@ export default function BoardEntryQrModal({
                 주소를 준비하는 중...
               </div>
             )}
-            <p className={`mt-4 break-all text-center text-[clamp(1rem,1.5vw,1.35rem)] text-gray-600 ${showCode ? 'max-w-[min(42vmin,24rem)]' : 'max-w-[min(52vmin,28rem)]'}`}>
-              {entryUrl || ' '}
-            </p>
           </div>
 
           {showCode && (
@@ -90,7 +90,7 @@ export default function BoardEntryQrModal({
           </p>
         )}
 
-        <div className="mt-8 flex justify-center">
+        <div className="mt-[clamp(1rem,2.4vh,2rem)] flex justify-center">
           <button
             type="button"
             onClick={onClose}

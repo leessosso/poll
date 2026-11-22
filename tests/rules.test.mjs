@@ -769,3 +769,26 @@ function attendanceVote(db, uid) {
     });
   });
 }
+
+
+describe('boardState rules', () => {
+  test('로그인한 사용자는 현황판 모드를 읽고 관리자만 바꾸며 문서는 지우지 못한다', async () => {
+    const now = Date.now();
+    await seed(async (db) => {
+      await setDoc(doc(db, 'boardState/current'), { mode: 'results', updatedAt: now });
+    });
+
+    await assertFails(getDoc(doc(unauth(), 'boardState/current')));
+    await assertSucceeds(getDoc(doc(voter(), 'boardState/current')));
+    await assertSucceeds(getDoc(doc(admin(), 'boardState/current')));
+
+    await assertFails(setDoc(doc(voter(), 'boardState/current'), { mode: 'standby', updatedAt: now + 1 }));
+    await assertSucceeds(setDoc(doc(admin(), 'boardState/current'), { mode: 'standby', updatedAt: now + 1 }));
+    await assertSucceeds(setDoc(doc(admin(), 'boardState/current'), { mode: 'results', updatedAt: now + 2 }));
+    await assertFails(setDoc(doc(admin(), 'boardState/current'), { mode: 'hidden', updatedAt: now + 3 }));
+    await assertFails(setDoc(doc(admin(), 'boardState/current'), { mode: 'standby', updatedAt: now + 3, extra: true }));
+    await assertFails(setDoc(doc(admin(), 'boardState/other'), { mode: 'standby', updatedAt: now + 3 }));
+    await assertFails(deleteDoc(doc(admin(), 'boardState/current')));
+    await assertFails(deleteDoc(doc(voter(), 'boardState/current')));
+  });
+});
