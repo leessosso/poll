@@ -2,6 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { pollTitle } from './lib/org-config.ts'
+
+document.title = pollTitle
 
 const legacyHash = window.location.hash.match(/^#(\/.*)$/)
 if (legacyHash) {

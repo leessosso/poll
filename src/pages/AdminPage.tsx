@@ -4,6 +4,14 @@ import { signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'fire
 import { doc, deleteDoc } from 'firebase/firestore';
 import { isAdminAccount } from '../lib/admin-auth';
 import { emergencyAdminEmail } from '../lib/emergency-admin';
+import {
+  adminIntro,
+  emergencyAdminId,
+  emergencyHint,
+  orgName,
+  shellFailureCopy,
+  shellSsoEnabled,
+} from '../lib/org-config';
 import { auth, db } from '../lib/firebase';
 import {
   buildAdminReturnTo,
@@ -28,48 +36,9 @@ import { useMeetingCheckins } from '../hooks/useMeetingCheckins';
 import AdminHeadcountBadge from '../components/AdminHeadcountBadge';
 import HeadcountPanel, { StartHeadcountDialog } from '../components/HeadcountPanel';
 
-const FAILURE_COPY: Record<ShellLoginFailure, { title: string; body: string }> = {
-  malformed: {
-    title: '로그인 코드를 확인하지 못했습니다',
-    body: '주소의 코드가 없거나 형식이 맞지 않습니다. 2청년회 웹에서 다시 들어와 주세요.',
-  },
-  'bad-request': {
-    title: '로그인 요청이 올바르지 않습니다',
-    body: '코드나 요청 형식이 맞지 않아 교환하지 못했습니다. 2청년회 웹에서 다시 들어와 주세요.',
-  },
-  forbidden: {
-    title: '투표 관리 권한이 없습니다',
-    body: '2청년회 웹 역할이 관리자(ADMIN) 또는 교역자(PASTOR)인 계정만 들어올 수 있습니다.',
-  },
-  'not-linked': {
-    title: '아직 회원과 연결되지 않은 계정입니다',
-    body: '이 계정에 연결된 회원이 없거나 한 명이 아닙니다. 2청년회 웹에서 회원 연결을 마친 뒤 다시 들어와 주세요.',
-  },
-  'session-mismatch': {
-    title: '로그인한 계정이 코드와 다릅니다',
-    body: '코드를 받은 계정과 지금 2청년회 웹에 로그인된 계정이 다릅니다. 2청년회 웹에서 다시 들어와 주세요.',
-  },
-  origin: {
-    title: '이 주소에서는 2청년회 웹 로그인을 열 수 없습니다',
-    body: '2청년회 웹 로그인은 https://dcc.leessosso.uk/poll/ 또는 https://leessosso.github.io/poll 에서만 동작합니다.',
-  },
-  expired: {
-    title: '로그인 코드가 만료되었습니다',
-    body: '코드는 60초 동안 한 번만 쓸 수 있습니다. 이미 사용했거나 시간이 지났습니다. 다시 시도해 주세요.',
-  },
-  'shell-down': {
-    title: '2청년회 웹에 연결하지 못했습니다',
-    body: '2청년회 웹이 응답하지 않거나 서버 설정에 문제가 있습니다. 복구되기 전에는 아래 비상 로그인을 사용해 주세요.',
-  },
-  unauthenticated: {
-    title: '2청년회 웹에서 사용자를 확인하지 못했습니다',
-    body: '코드를 발급한 계정을 2청년회 웹에서 찾지 못했습니다. 2청년회 웹에서 다시 로그인해 주세요.',
-  },
-};
-
 export default function AdminPage() {
   const { ready, isAdmin, logout } = useAdminAuth();
-  const [fragment] = useState(() => takeAdminFragment());
+  const [fragment] = useState(() => (shellSsoEnabled ? takeAdminFragment() : { status: 'absent' as const }));
   const [failure, setFailure] = useState<ShellLoginFailure | null>(
     fragment.status === 'malformed' ? 'malformed' : null,
   );
@@ -109,7 +78,7 @@ export default function AdminPage() {
   if (exchanging || !ready) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-gray-400">{exchanging ? '2청년회 웹 로그인 확인 중...' : '불러오는 중...'}</p>
+        <p className="text-gray-400">{exchanging ? `${orgName} 웹 로그인 확인 중...` : '불러오는 중...'}</p>
       </div>
     );
   }
@@ -129,9 +98,9 @@ function redirectToShell(onBlocked: () => void) {
 function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
   const [localFailure, setLocalFailure] = useState<ShellLoginFailure | null>(null);
   const shown = localFailure ?? failure;
-  const [showEmergency, setShowEmergency] = useState(shown === 'shell-down');
-  const copy = shown ? FAILURE_COPY[shown] : null;
-  const offerRetry = shown !== 'origin' && shown !== 'shell-down';
+  const [showEmergency, setShowEmergency] = useState(shown === 'shell-down' || !shellSsoEnabled);
+  const copy = shown ? shellFailureCopy[shown] : null;
+  const offerRetry = shellSsoEnabled && shown !== 'origin' && shown !== 'shell-down';
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4 py-10">
@@ -140,7 +109,7 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
           {copy ? copy.title : '관리자 로그인'}
         </h1>
         <p className="text-gray-500 text-sm text-center mb-6 leading-relaxed">
-          {copy ? copy.body : '등촌교회 2청년회 투표 관리. 2청년회 웹 계정으로 들어옵니다.'}
+          {copy ? copy.body : adminIntro}
         </p>
         {offerRetry && (
           <button
@@ -148,26 +117,28 @@ function AdminLogin({ failure }: { failure: ShellLoginFailure | null }) {
             onClick={() => redirectToShell(() => setLocalFailure('origin'))}
             className="w-full bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-hover"
           >
-            {failure ? '2청년회 웹으로 다시 로그인' : '2청년회 웹으로 로그인'}
+            {failure ? `${orgName} 웹으로 다시 로그인` : `${orgName} 웹으로 로그인`}
           </button>
         )}
-        {shown === 'shell-down' && (
+        {shellSsoEnabled && shown === 'shell-down' && (
           <button
             type="button"
             onClick={() => redirectToShell(() => setLocalFailure('origin'))}
             className="w-full mt-3 border border-border text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50"
           >
-            2청년회 웹이 복구되면 다시 시도
+            {orgName} 웹이 복구되면 다시 시도
           </button>
         )}
-        <div className={offerRetry || failure === 'shell-down' ? 'mt-6' : ''}>
-          <button
-            type="button"
-            onClick={() => setShowEmergency((open) => !open)}
-            className="text-sm text-gray-400 underline"
-          >
-            {showEmergency ? '비상 로그인 닫기' : '비상 로그인'}
-          </button>
+        <div className={offerRetry || (shellSsoEnabled && failure === 'shell-down') ? 'mt-6' : ''}>
+          {shellSsoEnabled && (
+            <button
+              type="button"
+              onClick={() => setShowEmergency((open) => !open)}
+              className="text-sm text-gray-400 underline"
+            >
+              {showEmergency ? '비상 로그인 닫기' : '비상 로그인'}
+            </button>
+          )}
           {showEmergency && <EmergencyLogin />}
         </div>
       </div>
@@ -209,7 +180,7 @@ function EmergencyLogin() {
   return (
     <form onSubmit={handleLogin} className="space-y-4 mt-4">
       <p className="text-gray-400 text-xs leading-relaxed">
-        2청년회 웹이 멈춰 있을 때만 사용합니다. 미리 만들어 둔 Firebase 계정과 관리자 클레임이 있어야 합니다.
+        {emergencyHint}
       </p>
       <div>
         <label htmlFor="emergency-admin-id" className="mb-1.5 block text-sm font-medium text-gray-600">
@@ -220,7 +191,7 @@ function EmergencyLogin() {
           type="text"
           value={adminId}
           onChange={(e) => { setAdminId(e.target.value); setError(''); }}
-          placeholder="admin2ch"
+          placeholder={emergencyAdminId}
           autoComplete="username"
           autoCapitalize="off"
           autoCorrect="off"
