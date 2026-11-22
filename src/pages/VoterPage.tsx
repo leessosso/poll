@@ -90,17 +90,34 @@ function VoterScreen() {
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-primary text-white px-5 py-4 shadow">
-        <h1 className="text-lg font-bold">등촌교회 2청년회 투표 시스템</h1>
-        {session && (
-          <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
-        )}
-        {claim && (
-          <p className="text-white/80 text-sm mt-1">
-            {claim.badge && claim.voterName === `${claim.badge}번`
-              ? `입장 완료 · ${claim.badge}번`
-              : `${claim.voterName}님 입장 완료${claim.badge ? ` · ${claim.badge}번` : ''}`}
-          </p>
-        )}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold">등촌교회 2청년회 투표 시스템</h1>
+            {session && (
+              <p className="text-white/80 text-sm mt-1">{session.voterName}님 출석 확인 완료</p>
+            )}
+            {claim && (
+              <p className="text-white/80 text-sm mt-1">
+                {claim.badge && claim.voterName === `${claim.badge}번`
+                  ? `입장 완료 · ${claim.badge}번`
+                  : `${claim.voterName}님 입장 완료${claim.badge ? ` · ${claim.badge}번` : ''}`}
+              </p>
+            )}
+          </div>
+          {canExit && (
+            <button
+              type="button"
+              onClick={() => {
+                setExitError('');
+                setConfirmingExit(true);
+              }}
+              disabled={exiting}
+              className="shrink-0 border border-white/70 text-white text-sm px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+            >
+              퇴장
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
@@ -160,25 +177,6 @@ function VoterScreen() {
                 <p className="text-gray-400 text-sm mt-1">관리자가 투표를 열면 바로 나타납니다</p>
               </>
             )}
-            {canExit && (
-              <div className="mt-6">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExitError('');
-                    setConfirmingExit(true);
-                  }}
-                  disabled={exiting}
-                  className="w-full border border-border text-gray-600 py-3 rounded-xl font-semibold disabled:opacity-50"
-                >
-                  퇴장
-                </button>
-                <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-                  다른 기기로도 입장했다면, 쓰지 않는 기기에서 퇴장해 주세요.
-                </p>
-                {exitError && <p className="text-sm text-red-500 mt-2">{exitError}</p>}
-              </div>
-            )}
           </div>
         )}
 
@@ -198,6 +196,7 @@ function VoterScreen() {
       {confirmingExit && canExit && (
         <ExitDeviceModal
           loading={exiting}
+          error={exitError}
           onConfirm={() => void handleExit()}
           onCancel={() => {
             if (!exiting) setConfirmingExit(false);

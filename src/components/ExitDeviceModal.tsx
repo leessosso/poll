@@ -1,10 +1,11 @@
 interface ExitDeviceModalProps {
   loading: boolean;
+  error?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export default function ExitDeviceModal({ loading, onConfirm, onCancel }: ExitDeviceModalProps) {
+export default function ExitDeviceModal({ loading, error, onConfirm, onCancel }: ExitDeviceModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div
@@ -14,11 +15,12 @@ export default function ExitDeviceModal({ loading, onConfirm, onCancel }: ExitDe
         className="bg-surface rounded-2xl p-6 w-full max-w-sm text-center shadow-xl border border-border"
       >
         <h2 id="exit-device-title" className="text-xl font-bold text-gray-800 mb-3">
-          이 기기에서 퇴장할까요?
+          혹시 중복 입장하셨나요?
         </h2>
         <p className="text-sm text-gray-500 leading-relaxed mb-6">
-          다른 기기로 이미 입장했다면 여기서 퇴장하세요. 이 기기의 번호는 해제되고, 필요하면 입장 코드로 다시 들어올 수 있습니다.
+          실수로 두 기기에서 입장하셨다면 하나는 퇴장해 주세요. 퇴장해도 입장 코드로 다시 들어올 수 있어요.
         </p>
+        {error && <p className="text-sm text-red-500 mb-4">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
@@ -34,7 +36,7 @@ export default function ExitDeviceModal({ loading, onConfirm, onCancel }: ExitDe
             disabled={loading}
             className="py-3 rounded-xl bg-primary text-white font-semibold disabled:opacity-50"
           >
-            {loading ? '퇴장 중...' : '퇴장'}
+            {loading ? '퇴장 중...' : '이 기기에서 퇴장'}
           </button>
         </div>
       </div>
