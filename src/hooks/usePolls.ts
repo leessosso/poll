@@ -35,12 +35,14 @@ export function usePolls(
   const visibleGeneration = usePageVisibleGeneration();
   const [polls, setPolls] = useState<Poll[]>([]);
   const [tallies, setTallies] = useState<Record<string, Record<string, number>>>({});
+  const [progress, setProgress] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const tallyKey = polls
     .filter((poll) => tallyVisible(poll, audience, tallyScope))
     .map((poll) => poll.id)
     .sort()
     .join(',');
+  const progressKey = audience === 'admin' ? polls.map((poll) => poll.id).sort().join(',') : '';
 
   useEffect(() => {
     const base = query(collection(db, 'polls'), orderBy('createdAt', 'desc'));
@@ -70,9 +72,45 @@ export function usePolls(
     };
   }, [tallyKey]);
 
+  // 진행 중 총원은 투표 문서가 아니라 관리자 전용 progress 문서에 있다.
+  // 투표자 화면은 이 구독을 만들지 않는다.
+  useEffect(() => {
+    if (audience !== 'admin' || !progressKey) return;
+    const unsubs = progressKey.split(',').map((pollId) =>
+      onSnapshot(
+        doc(db, 'polls', pollId, 'progress', 'current'),
+        (snap) => {
+          const castCount = snap.exists() ? snap.data().castCount : undefined;
+          setProgress((prev) => {
+            if (typeof castCount !== 'number') {
+              if (!(pollId in prev)) return prev;
+              const next = { ...prev };
+              delete next[pollId];
+              return next;
+            }
+            if (prev[pollId] === castCount) return prev;
+            return { ...prev, [pollId]: castCount };
+          });
+        },
+        () => {
+          setProgress((prev) => {
+            if (!(pollId in prev)) return prev;
+            const next = { ...prev };
+            delete next[pollId];
+            return next;
+          });
+        },
+      ),
+    );
+    return () => {
+      for (const unsub of unsubs) unsub();
+    };
+  }, [audience, progressKey]);
+
   return {
     polls: polls.map((poll) => ({
       ...poll,
+      castCount: poll.id in progress ? progress[poll.id] : poll.castCount,
       results: tallyVisible(poll, audience, tallyScope) ? (tallies[poll.id] ?? {}) : {},
     })),
     loading,

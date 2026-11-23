@@ -84,7 +84,8 @@ React + Firebase + GitHub Pages 기반 실시간 투표 시스템입니다.
 
 | 컬렉션 | 역할 |
 |--------|------|
-| `polls` | 투표 정의, 상태, 공개 여부, 선택지가 없는 참여 총원 `castCount` |
+| `polls` | 투표 정의, 상태, 공개 여부. 진행 중에는 총원을 올리지 않는다. 마감 때 또는 예전 투표의 `castCount`만 남아 있다 |
+| `polls/{pollId}/progress/current` | 선택지가 없는 참여 총원 `castCount`. 관리자만 읽는다. 투표자는 구독하지 않는다 |
 | `polls/{pollId}/tally/current` | 선택지별 집계. 마감 후 공개이거나 관리자만 읽음 |
 | `polls/{pollId}/voteGuards/{uid}` | 한 계정의 1표 잠금. 선택값은 없고 클라이언트는 읽지 않음 |
 | `polls/{pollId}/participation` | 현장 명단·QR 출석 투표의 참여 여부. 이름과 완료 여부만 있고 선택값은 없음 |
@@ -99,8 +100,7 @@ React + Firebase + GitHub Pages 기반 실시간 투표 시스템입니다.
 
 | 경로 | 역할 |
 |------|------|
-| `presence/{sessionId}` | 헤더 `현재`. 투표 화면 탭이 열려 있는지 |
-| `visitors/{YYYY-MM-DD}/{clientId}` | 헤더 `진입`. 오늘 투표 화면을 연 브라우저 |
+| `presence`, `visitors` | 앱은 더 이상 쓰지 않는다. 규칙은 예전 기록을 위해 남겨 둔다. 인원은 이번 모임 입장 수로 본다 |
 
 ## 로컬 실행
 
@@ -144,7 +144,7 @@ Firestore 규칙과 Realtime Database 규칙은 저장소의 `firestore.rules`, 
 
 이메일/비밀번호는 셸이 죽었을 때의 비상 로그인이다. 화면에서는 "비상 로그인"으로만 연다. 같은 관리자 클레임이 있어야 한다.
 
-투표를 시작할 때 관리자가 투표 인원(`expectedCount`)을 넣는다. 그 수만큼 집계되면 규칙은 더 이상 표를 받지 않는다. 필드가 없는 예전 투표는 상한이 없다. 진행 중에도 관리자만 인원을 바꿀 수 있다.
+투표를 시작할 때 관리자가 투표 인원(`expectedCount`)을 넣는다. 그 수만큼 `progress/current`가 오르면 규칙은 더 이상 표를 받지 않는다. 상한은 투표 문서의 `castCount`가 아니라 progress 문서를 본다. 필드가 없는 예전 투표는 상한이 없다. 진행 중에도 관리자만 인원을 바꿀 수 있다. 표마다 투표 문서를 고치지 않으므로, 투표자 구독에는 시작·마감·결과 공개만 전달된다.
 
 투표자 화면의 이름 목록은 `voterDirectory`만 읽는다. `externalQrId`와 `memberNo`는 `voters`에 남고 관리자만 읽는다. 규칙을 올리기 전에 `scripts/migrate-voter-directory.mjs`로 공개 이름 문서를 만든다. 스크립트는 기본 dry-run이고 기존 필드를 지우지 않는다.
 
@@ -227,7 +227,7 @@ npx firebase deploy --only firestore:rules,database --project dcc-poll
 - 관리자 계정은 규칙을 통과하는 쓰기를 모두 할 수 있다. 집계를 직접 고치는 것도 여기 포함된다.
 - 셸이 `mid`로 유권자를 묶기 전에는 위 익명 한계가 남는다. 교체 규격은 [`docs/security-shell-admin.md`](docs/security-shell-admin.md)에 있다.
 
-선택지별 숫자는 `polls/{id}/tally/current`에만 있다. 투표가 `closed`이고 `showResults`가 켜져 있거나, 관리자일 때만 읽는다. 진행 중에는 `showResults`를 켜도 투표자 화면은 집계를 요청하지 않는다. 정족수 막대는 선택지가 없는 `castCount`만 본다.
+선택지별 숫자는 `polls/{id}/tally/current`에만 있다. 투표가 `closed`이고 `showResults`가 켜져 있거나, 관리자일 때만 읽는다. 진행 중에는 `showResults`를 켜도 투표자 화면은 집계를 요청하지 않는다. 관리자 정족수 막대는 progress의 `castCount`만 본다. 투표자 화면은 진행 중 총원을 구독하지 않고, 마감 뒤 공개된 집계로 정족수와 가결을 본다.
 
 ## 푸시와 배포
 

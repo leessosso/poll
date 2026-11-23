@@ -4,16 +4,15 @@ import type { Poll } from '../types';
 
 interface HeadcountPanelProps {
   poll: Poll;
-  presenceCount: number;
   checkinCount: number;
 }
 
-export default function HeadcountPanel({ poll, presenceCount, checkinCount }: HeadcountPanelProps) {
+export default function HeadcountPanel({ poll, checkinCount }: HeadcountPanelProps) {
   const [draft, setDraft] = useState(String(poll.expectedCount ?? ''));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const expected = poll.expectedCount;
-  const over = typeof expected === 'number' && (presenceCount > expected || checkinCount > expected);
+  const over = typeof expected === 'number' && checkinCount > expected;
 
   const save = async () => {
     const next = Number(draft);
@@ -43,15 +42,14 @@ export default function HeadcountPanel({ poll, presenceCount, checkinCount }: He
         )}
       </div>
       <p className="text-sm text-gray-500 leading-relaxed">이 수만큼 표가 들어오면 투표가 마감돼요.</p>
-      <div className="grid grid-cols-4 gap-2 text-center">
+      <div className="grid grid-cols-3 gap-2 text-center">
         <Count label="투표 인원" value={expected ?? '—'} />
-        <Count label="접속" value={presenceCount} />
         <Count label="입장" value={checkinCount} />
         <Count label="투표" value={poll.castCount} />
       </div>
       {over && (
         <p className="text-sm text-accent leading-relaxed">
-          접속 또는 입장이 투표 인원보다 많아요. 현장에서 인원을 확인한 뒤 투표 인원을 조정해 주세요.
+          입장이 투표 인원보다 많아요. 현장에서 인원을 확인한 뒤 투표 인원을 조정해 주세요.
         </p>
       )}
       <div className="flex items-center gap-2">

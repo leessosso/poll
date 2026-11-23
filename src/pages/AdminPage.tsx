@@ -24,7 +24,6 @@ import {
 } from '../lib/shell-admin';
 import { useAdminAuth } from '../hooks/useAdminAuth';
 import { usePolls } from '../hooks/usePolls';
-import { usePresenceStats } from '../hooks/usePresenceStats';
 import type { Poll } from '../types';
 import PollAdminCard from '../components/PollAdminCard';
 import CreatePollForm from '../components/CreatePollForm';
@@ -226,7 +225,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const { presenceCount, visitorCount, ready: statsReady } = usePresenceStats(refreshKey);
   const { checkins, loading: checkinsLoading } = useMeetingCheckins(refreshKey);
   const [showCreate, setShowCreate] = useState(false);
   const [openingPoll, setOpeningPoll] = useState<Poll | null>(null);
@@ -237,11 +235,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!refreshing) return;
-    if (statsReady && !checkinsLoading) {
+    if (!checkinsLoading) {
       setRefreshing(false);
       setUpdatedAt(Date.now());
     }
-  }, [refreshing, statsReady, checkinsLoading]);
+  }, [refreshing, checkinsLoading]);
 
   const activePoll = polls.find((p) => p.status === 'active');
   const waitingPolls = polls.filter((p) => p.status === 'waiting');
@@ -299,8 +297,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         <h1 className="text-lg font-bold">관리자 대시보드</h1>
         <div className="flex items-center gap-3">
           <AdminHeadcountBadge
-            visitorCount={visitorCount}
-            presenceCount={presenceCount}
             checkinCount={checkins.length}
             refreshing={refreshing}
             updatedAt={updatedAt}
@@ -335,7 +331,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               <HeadcountPanel
                 key={activePoll.id}
                 poll={activePoll}
-                presenceCount={presenceCount}
                 checkinCount={checkins.length}
               />
             </div>
@@ -355,7 +350,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         <VoteBoard layout="panel" />
 
-        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} presenceCount={presenceCount} checkins={checkins} />
+        <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} checkins={checkins} />
 
         {waitingPolls.length > 0 && (
           <section>
@@ -409,10 +404,10 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
       {openingPoll && (
         <StartHeadcountDialog
-          defaultCount={openingPoll.eligibilityMode === 'roster' ? checkins.length : presenceCount}
+          defaultCount={openingPoll.eligibilityMode === 'roster' ? checkins.length : 0}
           hint={
             openingPoll.eligibilityMode === 'roster' && checkins.length === 0
-              ? '이번 모임에 입장한 사람이 없어 비워 두었어요. 접속 수는 창이 열린 기기 수라 투표 인원에 넣지 않아요.'
+              ? '이번 모임에 입장한 사람이 없어요. 입장한 뒤에 투표 인원을 정할 수 있어요.'
               : undefined
           }
           submitting={opening}

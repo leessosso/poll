@@ -40,6 +40,11 @@ function tallyRef(pollId: string) {
   return doc(db, 'polls', pollId, 'tally', 'current');
 }
 
+/** 투표 중 오르는 참여 총원. 투표자는 이 문서를 구독하지 않는다. */
+function progressRef(pollId: string) {
+  return doc(db, 'polls', pollId, 'progress', 'current');
+}
+
 function lampRef(meetingId: string, badge: number) {
   return doc(db, 'lamps', lampId(meetingId, badge));
 }
@@ -99,12 +104,6 @@ async function commitOps(ops: Array<(batch: WriteBatch) => void>): Promise<void>
 
 function emptyCounts(poll: Poll): Record<string, number> {
   return Object.fromEntries(getOptions(poll).map((option) => [option, 0]));
-}
-
-function assertUnderHeadcount(poll: Poll): void {
-  if (typeof poll.expectedCount === 'number' && poll.castCount >= poll.expectedCount) {
-    throw new Error('투표 인원만큼 투표가 끝났어요.');
-  }
 }
 
 function permissionError(err: unknown, fallback: string): Error {
@@ -252,6 +251,7 @@ export async function startPollWithParticipation(poll: Poll, expectedCount: numb
   }
 
   ops.push((batch) => batch.set(tallyRef(poll.id), { counts: emptyCounts(poll) }));
+  ops.push((batch) => batch.set(progressRef(poll.id), { castCount: 0 }));
   ops.push((batch) => batch.update(doc(db, 'polls', poll.id), {
     status: 'active',
     startedAt: now,
@@ -279,6 +279,7 @@ export async function finalizePoll(poll: Poll): Promise<void> {
   await runTransaction(db, async (tx) => {
     const pollSnap = await tx.get(pollRef);
     if (!pollSnap.exists() || pollSnap.data().status !== 'active') return;
+    const progressSnap = await tx.get(progressRef(poll.id));
 
     const stillPending = [];
     for (const participantRef of pendingRefs) {
@@ -292,10 +293,21 @@ export async function finalizePoll(poll: Poll): Promise<void> {
       tx.update(participantRef, { status: 'completed', completedAt: now });
     }
 
-    const updates: Record<string, unknown> = { status: 'closed', closedAt: now };
-    if (stillPending.length > 0 && poll.allowAbstain) {
-      updates.castCount = increment(stillPending.length);
-      tx.update(tallyRef(poll.id), { 'counts.기권': increment(stillPending.length) });
+    const stored = pollSnap.data().castCount;
+    const live = progressSnap.exists() ? progressSnap.data().castCount : stored;
+    const base = typeof live === 'number' ? live : 0;
+    const abstain = stillPending.length > 0 && poll.allowAbstain ? stillPending.length : 0;
+    const updates: Record<string, unknown> = {
+      status: 'closed',
+      closedAt: now,
+      // 마감 한 번만 투표 문서에 총원을 굳힌다. 진행 중에는 progress 만 오른다.
+      castCount: base + abstain,
+    };
+    if (progressSnap.exists()) {
+      tx.update(progressRef(poll.id), { castCount: base + abstain });
+    }
+    if (abstain > 0) {
+      tx.update(tallyRef(poll.id), { 'counts.기권': increment(abstain) });
     }
     tx.update(pollRef, updates);
   });
@@ -306,7 +318,6 @@ export async function castAttendanceVote(
   choice: string,
   session: VoterSession,
 ): Promise<void> {
-  assertUnderHeadcount(poll);
   const now = Date.now();
   const uid = requireUid();
   const sessionRef = doc(db, 'attendanceSessions', session.sessionId);
@@ -349,7 +360,7 @@ export async function castAttendanceVote(
       },
       { merge: true },
     );
-    tx.update(pollRef, { castCount: increment(1) });
+    tx.update(progressRef(poll.id), { castCount: increment(1) });
     tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), {
       voterId: session.voterId,
@@ -551,7 +562,6 @@ export async function removeVoterFromRoster(voterId: string, activePoll: Poll | 
 }
 
 export async function castRosterVote(poll: Poll, choice: string, claim: RosterClaim): Promise<void> {
-  assertUnderHeadcount(poll);
   const now = Date.now();
   const uid = requireUid();
   const pollRef = doc(db, 'polls', poll.id);
@@ -586,7 +596,7 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
     const lightSeat = Boolean(seatSnap?.exists() && seatSnap.data().pollId === poll.id && seatSnap.data().state === 'pending');
 
     tx.update(participantRef, { status: 'completed', completedAt: now });
-    tx.update(pollRef, { castCount: increment(1) });
+    tx.update(progressRef(poll.id), { castCount: increment(1) });
     tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { voterId: claim.voterId });
     if (seatRef && lightSeat) tx.update(seatRef, { state: 'voted' });
@@ -597,7 +607,6 @@ export async function castRosterVote(poll: Poll, choice: string, claim: RosterCl
 }
 
 export async function castOpenVote(poll: Poll, choice: string): Promise<void> {
-  assertUnderHeadcount(poll);
   const now = Date.now();
   const pollRef = doc(db, 'polls', poll.id);
   const uid = requireUid();
@@ -611,7 +620,7 @@ export async function castOpenVote(poll: Poll, choice: string): Promise<void> {
       if (currentPoll.endsAt && now >= currentPoll.endsAt) throw new Error('투표 시간이 종료되었습니다.');
       if (!getOptions(currentPoll).includes(choice)) throw new Error('선택할 수 없는 항목입니다.');
 
-      tx.update(pollRef, { castCount: increment(1) });
+      tx.update(progressRef(poll.id), { castCount: increment(1) });
       tx.update(tallyRef(poll.id), { [`counts.${choice}`]: increment(1) });
       tx.set(doc(db, 'polls', poll.id, 'voteGuards', uid), { createdAt: now });
     });

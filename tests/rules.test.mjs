@@ -79,6 +79,10 @@ function counts(overrides = {}) {
   return { counts: { 찬성: 0, 반대: 0, 기권: 0, ...overrides } };
 }
 
+function progress(castCount = 0) {
+  return { castCount };
+}
+
 async function seed(write) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await write(context.firestore());
@@ -250,6 +254,7 @@ describe('firestore rules', () => {
     await seed(async (sdb) => {
       await setDoc(doc(sdb, 'polls/poll1'), pollData({ meetingId: MID2 }));
       await setDoc(doc(sdb, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(sdb, 'polls/poll1/progress/current'), progress());
       await setDoc(doc(sdb, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
       await setDoc(doc(sdb, 'polls/poll1/participation/voter-2'), { voterId: 'voter-2', voterName: '418번', status: 'pending', createdAt: 1 });
     });
@@ -263,6 +268,7 @@ describe('firestore rules', () => {
     await seed(async (sdb) => {
       await setDoc(doc(sdb, 'polls/poll1'), pollData({ meetingId: MID }));
       await setDoc(doc(sdb, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(sdb, 'polls/poll1/progress/current'), progress());
       await setDoc(doc(sdb, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
       await setDoc(doc(sdb, `lamps/${MID}_417`), { meetingId: MID, badge: 417, state: 'pending', pollId: 'poll1' });
     });
@@ -363,7 +369,7 @@ describe('firestore rules', () => {
         completedAt: Date.now(),
         choice: '찬성',
       });
-      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/progress/current'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), { 'counts.찬성': increment(1) });
       tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1' });
     }));
@@ -373,7 +379,7 @@ describe('firestore rules', () => {
         status: 'completed',
         completedAt: Date.now(),
       });
-      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/progress/current'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), {
         'counts.찬성': increment(1),
         'counts.반대': increment(1),
@@ -386,7 +392,7 @@ describe('firestore rules', () => {
         status: 'completed',
         completedAt: Date.now(),
       });
-      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/progress/current'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), {
         'counts.찬성': increment(2),
       });
@@ -398,13 +404,15 @@ describe('firestore rules', () => {
         status: 'completed',
         completedAt: Date.now(),
       });
-      tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+      tx.update(doc(db, 'polls/poll1/progress/current'), { castCount: increment(1) });
       tx.update(doc(db, 'polls/poll1/tally/current'), {
         'counts.찬성': increment(1),
         voterId: 'voter-1',
       });
       tx.set(doc(db, 'polls/poll1/voteGuards/voter-1'), { voterId: 'voter-1', choice: '찬성' });
     }));
+
+    await assertFails(updateDoc(doc(db, 'polls/poll1'), { castCount: increment(1) }));
   });
 
   test('진행 중 집계는 관리자도 읽지 못하고 마감 뒤 관리자, 공개 뒤 투표자가 읽는다', async () => {
@@ -455,6 +463,7 @@ describe('firestore rules', () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll1'), pollData({ meetingId: MID }));
       await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll1/progress/current'), progress());
       await setDoc(doc(db, 'polls/poll1/participation/voter-1'), { voterId: 'voter-1', voterName: '417번', status: 'pending', createdAt: 1 });
     });
 
@@ -479,6 +488,7 @@ describe('firestore rules', () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll-open'), pollData({ eligibilityMode: 'open' }));
       await setDoc(doc(db, 'polls/poll-open/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll-open/progress/current'), progress());
     });
     await assertSucceeds(openVote(voter(), 'voter-1'));
     await assertFails(openVote(voter(), 'voter-1'));
@@ -490,6 +500,7 @@ describe('firestore rules', () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll-att'), pollData({ eligibilityMode: 'attendance', eventId: 'elder-vote' }));
       await setDoc(doc(db, 'polls/poll-att/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll-att/progress/current'), progress());
       await setDoc(doc(db, 'voters/v1'), { name: '김철수', externalQrId: '', active: true, createdAt: 1 });
       await setDoc(doc(db, 'attendanceSessions/session_' + UUID), {
         eventId: 'elder-vote',
@@ -516,12 +527,23 @@ describe('firestore rules', () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'polls/poll-cap'), pollData({ eligibilityMode: 'open', expectedCount: 1, castCount: 0 }));
       await setDoc(doc(db, 'polls/poll-cap/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll-cap/progress/current'), progress(0));
+      // 투표 문서의 castCount 가 커도 progress 가 상한이면 거부한다.
       await setDoc(doc(db, 'polls/poll-full'), pollData({
         eligibilityMode: 'open',
         expectedCount: 1,
-        castCount: 1,
+        castCount: 0,
       }));
       await setDoc(doc(db, 'polls/poll-full/tally/current'), counts({ 찬성: 1 }));
+      await setDoc(doc(db, 'polls/poll-full/progress/current'), progress(1));
+      // progress 가 0이면 투표 문서에 옛 총원이 있어도 표를 받는다.
+      await setDoc(doc(db, 'polls/poll-legacy-count'), pollData({
+        eligibilityMode: 'open',
+        expectedCount: 2,
+        castCount: 99,
+      }));
+      await setDoc(doc(db, 'polls/poll-legacy-count/tally/current'), counts());
+      await setDoc(doc(db, 'polls/poll-legacy-count/progress/current'), progress(0));
     });
 
     await assertSucceeds(voteOpen(voter(), 'voter-1', 'poll-cap'));
@@ -530,6 +552,38 @@ describe('firestore rules', () => {
     await assertSucceeds(updateDoc(doc(admin(), 'polls/poll-full'), { expectedCount: 2 }));
     await assertSucceeds(voteOpen(voter('voter-3'), 'voter-3', 'poll-full'));
     await assertFails(updateDoc(doc(voter(), 'polls/poll-cap'), { expectedCount: 9 }));
+    await assertSucceeds(voteOpen(voter('voter-4'), 'voter-4', 'poll-legacy-count'));
+
+    let capPoll;
+    let capProgress;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      capPoll = (await getDoc(doc(ctx.firestore(), 'polls/poll-cap'))).data();
+      capProgress = (await getDoc(doc(ctx.firestore(), 'polls/poll-cap/progress/current'))).data();
+    });
+    assert.equal(capPoll.castCount, 0);
+    assert.equal(capProgress.castCount, 1);
+    await assertFails(getDoc(doc(voter(), 'polls/poll-cap/progress/current')));
+    await assertSucceeds(getDoc(doc(admin(), 'polls/poll-cap/progress/current')));
+    await assertFails(getDocs(collection(voter(), 'polls/poll-cap/progress')));
+  });
+
+  test('마감된 예전 투표의 castCount 는 투표 문서에서 그대로 읽힌다', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/old-closed'), pollData({
+        status: 'closed',
+        showResults: true,
+        closedAt: 2,
+        castCount: 7,
+        expectedCount: 7,
+      }));
+      await setDoc(doc(db, 'polls/old-closed/tally/current'), counts({ 찬성: 4, 반대: 3 }));
+    });
+
+    const poll = await assertSucceeds(getDoc(doc(voter(), 'polls/old-closed')));
+    assert.equal(poll.data().castCount, 7);
+    const tally = await assertSucceeds(getDoc(doc(voter(), 'polls/old-closed/tally/current')));
+    assert.equal(tally.data().counts['찬성'], 4);
+    await assertFails(getDoc(doc(voter(), 'polls/old-closed/progress/current')));
   });
 
   test('투표자는 명단(voters 및 voterDirectory)과 예전 선점 컬렉션을 읽지 못한다', async () => {
@@ -716,6 +770,7 @@ async function seedRoster() {
   await seed(async (db) => {
     await setDoc(doc(db, 'polls/poll1'), pollData({ meetingId: MID }));
     await setDoc(doc(db, 'polls/poll1/tally/current'), counts());
+    await setDoc(doc(db, 'polls/poll1/progress/current'), progress());
     await setDoc(doc(db, `checkins/${MID}_voter-1`), checkinBody('voter-1', { badge: 417 }));
     await setDoc(doc(db, 'polls/poll1/participation/voter-1'), {
       voterId: 'voter-1',
@@ -732,7 +787,7 @@ function rosterVote(db, uid, choice, { lamp } = {}) {
       status: 'completed',
       completedAt: Date.now(),
     });
-    tx.update(doc(db, 'polls/poll1'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll1/progress/current'), { castCount: increment(1) });
     tx.update(doc(db, 'polls/poll1/tally/current'), { [`counts.${choice}`]: increment(1) });
     tx.set(doc(db, `polls/poll1/voteGuards/${uid}`), { voterId: uid });
     if (lamp) tx.update(doc(db, lamp), { state: 'voted' });
@@ -741,7 +796,7 @@ function rosterVote(db, uid, choice, { lamp } = {}) {
 
 function voteOpen(db, uid, pollId) {
   return runTransaction(db, async (tx) => {
-    tx.update(doc(db, `polls/${pollId}`), { castCount: increment(1) });
+    tx.update(doc(db, `polls/${pollId}/progress/current`), { castCount: increment(1) });
     tx.update(doc(db, `polls/${pollId}/tally/current`), { 'counts.찬성': increment(1) });
     tx.set(doc(db, `polls/${pollId}/voteGuards/${uid}`), { createdAt: Date.now() });
   });
@@ -749,7 +804,7 @@ function voteOpen(db, uid, pollId) {
 
 function openVote(db, uid) {
   return runTransaction(db, async (tx) => {
-    tx.update(doc(db, 'polls/poll-open'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll-open/progress/current'), { castCount: increment(1) });
     tx.update(doc(db, 'polls/poll-open/tally/current'), { 'counts.찬성': increment(1) });
     tx.set(doc(db, `polls/poll-open/voteGuards/${uid}`), { createdAt: Date.now() });
   });
@@ -761,7 +816,7 @@ function attendanceVote(db, uid) {
       status: 'completed',
       completedAt: Date.now(),
     });
-    tx.update(doc(db, 'polls/poll-att'), { castCount: increment(1) });
+    tx.update(doc(db, 'polls/poll-att/progress/current'), { castCount: increment(1) });
     tx.update(doc(db, 'polls/poll-att/tally/current'), { 'counts.찬성': increment(1) });
     tx.set(doc(db, `polls/poll-att/voteGuards/${uid}`), {
       voterId: 'v1',

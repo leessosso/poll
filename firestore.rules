@@ -8,6 +8,9 @@ rules_version = '2';
 // 투표자: 익명 로그인. admin 클레임이 없는 인증 사용자만 투표 전이를 할 수 있다.
 // 선택값과 유권자 id는 어떤 문서에도 함께 두지 않는다.
 // 선택지별 집계의 공개 여부는 polls/{id}/tally/current 가 결정한다.
+// 투표 중 오르는 참여 총원 castCount 는 polls/{id}/progress/current 에만 있다.
+// 투표자는 이 문서를 읽지 않는다. 관리자만 읽는다. 투표 문서는 시작·마감·결과 공개처럼 가끔 바뀔 때만 갱신된다.
+// 이미 끝난 투표의 polls.castCount 는 그대로 두고, 새 표는 그 필드를 올리지 않는다.
 // 예전 polls.results 필드는 지우지 않아도 투표 문서 읽기가 된다. 새 쓰기로 그 맵을 바꾸지는 못한다.
 // 진행 중 집계는 관리자도 읽지 못한다. 마감 뒤에만 관리자가, 공개 뒤에만 투표자가 읽는다.
 //
@@ -74,6 +77,10 @@ service cloud.firestore {
 
     function guardPath(pollId) {
       return /databases/$(database)/documents/polls/$(pollId)/voteGuards/$(request.auth.uid);
+    }
+
+    function progressPath(pollId) {
+      return /databases/$(database)/documents/polls/$(pollId)/progress/current;
     }
 
     function partPath(pollId, voterId) {
@@ -227,11 +234,29 @@ service cloud.firestore {
 
     // 명단 투표는 투표 시작 때 고정한 모임(poll.meetingId)의 본인 입장만 인정한다.
     // 다시 연결로 회수된(revoked) 입장은 투표하지 못한다.
-    function rosterPartOk(pollId, guard, poll) {
+    // expectedCount 가 없으면 상한이 없다. 있으면 progress 의 현재 총원 미만일 때만 한 표를 더한다.
+    // 투표 문서의 castCount 는 보지 않는다. 그 필드는 예전 투표와 마감 때 굳힌 값이다.
+    function underHeadcount(poll, castCount) {
+      return !poll.keys().hasAny(['expectedCount'])
+        || poll.expectedCount == null
+        || castCount < poll.expectedCount;
+    }
+
+    function countAdvanced(before, after) {
+      return before.keys().hasOnly(['castCount'])
+        && after.keys().hasOnly(['castCount'])
+        && before.castCount is int
+        && after.castCount is int
+        && after.castCount == before.castCount + 1;
+    }
+
+    function openGuardOk(guard) {
+      return guard.keys().hasOnly(['createdAt']) && nearNow(guard.createdAt);
+    }
+
+    function rosterGuardOk(poll, guard, beforePart, afterPart) {
       let voterId = guard.voterId;
       let checkin = get(checkinPath(poll.get('meetingId', ''), request.auth.uid)).data;
-      let beforePart = get(partPath(pollId, voterId)).data;
-      let afterPart = getAfter(partPath(pollId, voterId)).data;
       return guard.keys().hasOnly(['voterId'])
         && guard.voterId is string
         && checkin.authUid == request.auth.uid
@@ -245,12 +270,9 @@ service cloud.firestore {
         && participantShape(afterPart);
     }
 
-    function attendancePartOk(pollId, guard) {
+    function attendanceGuardOk(guard, hadPart, beforePart, afterPart) {
       let voterId = guard.voterId;
       let session = get(/databases/$(database)/documents/attendanceSessions/$(guard.sessionId)).data;
-      let hadPart = exists(partPath(pollId, voterId));
-      let beforePart = hadPart ? get(partPath(pollId, voterId)).data : {};
-      let afterPart = getAfter(partPath(pollId, voterId)).data;
       return guard.keys().hasOnly(['voterId', 'sessionId'])
         && guard.voterId is string
         && guard.sessionId is string
@@ -272,36 +294,85 @@ service cloud.firestore {
         );
     }
 
-    // 문서 접근은 평가당 10회가 한도라, poll/tally/guard 는 여기서 한 번씩만 읽는다.
-    function voterBallotOk(pollId) {
-      let pollBefore = get(pollPath(pollId)).data;
-      let pollAfter = getAfter(pollPath(pollId)).data;
-      let beforeDoc = get(tallyPath(pollId)).data;
-      let afterDoc = getAfter(tallyPath(pollId)).data;
-      let guard = getAfter(guardPath(pollId)).data;
+    // progress, tally, voteGuards 규칙에서 쓴다. 참여 문서는 여기서 읽는다.
+    // 한 평가의 문서 접근은 10회가 한도다. 출석 투표의 guard 쓰기가 10회다.
+    // 함수 인자는 7개가 한도라 공통 검사를 이 함수 안에 둔다.
+    function foreignBallotOk(pollId, progressBefore, progressAfter, tallyBefore, tallyAfter, guard) {
+      let poll = get(pollPath(pollId)).data;
+      let roster = poll.eligibilityMode == 'roster';
+      let attendance = poll.eligibilityMode == 'attendance';
+      let voterId = roster || attendance ? guard.voterId : '';
+      let hadPart = roster ? true : (attendance ? exists(partPath(pollId, voterId)) : false);
+      let beforePart = hadPart ? get(partPath(pollId, voterId)).data : {};
+      let afterPart = roster || attendance ? getAfter(partPath(pollId, voterId)).data : {};
       return isVoter()
         && !exists(guardPath(pollId))
-        && pollIsOpen(pollBefore)
-        && pollAfter.diff(pollBefore).affectedKeys().hasOnly(['castCount'])
-        && pollAfter.castCount == pollBefore.castCount + 1
-        && underHeadcount(pollBefore)
-        && incrementOk(pollBefore, beforeDoc, afterDoc)
+        && pollIsOpen(poll)
+        && countAdvanced(progressBefore, progressAfter)
+        && underHeadcount(poll, progressBefore.castCount)
+        && incrementOk(poll, tallyBefore, tallyAfter)
         && (
-          (
-            pollBefore.eligibilityMode == 'open'
-            && guard.keys().hasOnly(['createdAt'])
-            && nearNow(guard.createdAt)
-          )
-          || (pollBefore.eligibilityMode == 'roster' && rosterPartOk(pollId, guard, pollBefore))
-          || (pollBefore.eligibilityMode == 'attendance' && attendancePartOk(pollId, guard))
+          (poll.eligibilityMode == 'open' && openGuardOk(guard))
+          || (poll.eligibilityMode == 'roster' && rosterGuardOk(poll, guard, beforePart, afterPart))
+          || (poll.eligibilityMode == 'attendance' && attendanceGuardOk(guard, hadPart, beforePart, afterPart))
         );
     }
 
-    // expectedCount 가 없으면 상한이 없다. 있으면 그 수 미만일 때만 한 표를 더한다.
-    function underHeadcount(poll) {
-      return !poll.keys().hasAny(['expectedCount'])
-        || poll.expectedCount == null
-        || poll.castCount < poll.expectedCount;
+    function progressBallotOk(pollId) {
+      return foreignBallotOk(
+        pollId,
+        resource.data,
+        request.resource.data,
+        get(tallyPath(pollId)).data,
+        getAfter(tallyPath(pollId)).data,
+        getAfter(guardPath(pollId)).data
+      );
+    }
+
+    function tallyBallotOk(pollId) {
+      return foreignBallotOk(
+        pollId,
+        get(progressPath(pollId)).data,
+        getAfter(progressPath(pollId)).data,
+        resource.data,
+        request.resource.data,
+        getAfter(guardPath(pollId)).data
+      );
+    }
+
+    function guardBallotOk(pollId) {
+      return foreignBallotOk(
+        pollId,
+        get(progressPath(pollId)).data,
+        getAfter(progressPath(pollId)).data,
+        get(tallyPath(pollId)).data,
+        getAfter(tallyPath(pollId)).data,
+        request.resource.data
+      );
+    }
+
+    // 참여 문서를 쓰는 규칙 전용. resource 가 이 문서라 참여 문서를 다시 읽지 않는다.
+    function partBallotOk(pollId) {
+      let poll = get(pollPath(pollId)).data;
+      let guard = getAfter(guardPath(pollId)).data;
+      let hadPart = resource != null;
+      let beforePart = hadPart ? resource.data : {};
+      let afterPart = request.resource.data;
+      let progressBefore = get(progressPath(pollId)).data;
+      let progressAfter = getAfter(progressPath(pollId)).data;
+      let tallyBefore = get(tallyPath(pollId)).data;
+      let tallyAfter = getAfter(tallyPath(pollId)).data;
+      return isVoter()
+        && poll.eligibilityMode != 'open'
+        && !exists(guardPath(pollId))
+        && pollIsOpen(poll)
+        && countAdvanced(progressBefore, progressAfter)
+        && underHeadcount(poll, progressBefore.castCount)
+        && incrementOk(poll, tallyBefore, tallyAfter)
+        && (
+          (poll.eligibilityMode == 'roster' && rosterGuardOk(poll, guard, beforePart, afterPart))
+          || (poll.eligibilityMode == 'attendance' && attendanceGuardOk(guard, hadPart, beforePart, afterPart))
+        );
     }
 
     // 비밀투표: 진행 중에는 관리자도 선택지별 집계를 읽지 못한다.
@@ -319,9 +390,30 @@ service cloud.firestore {
         && request.resource.data.status == 'waiting'
         && request.resource.data.castCount == 0
         && request.resource.data.showResults == false;
-      allow update: if isAdmin() && validPoll(request.resource.data) && validStatusMove() && resultsFrozen()
-        || isVoter() && voterBallotOk(pollId);
+      // 투표자는 투표 문서를 고치지 않는다. 표가 들어올 때마다 이 문서가 바뀌면
+      // 구독 중인 모든 투표자에게 읽기가 퍼진다.
+      allow update: if isAdmin() && validPoll(request.resource.data) && validStatusMove() && resultsFrozen();
       allow delete: if isAdmin();
+
+      match /progress/{docId} {
+        allow get: if docId == 'current'
+          && isAdmin()
+          && (resource == null || resource.data.keys().hasOnly(['castCount']));
+        allow list: if false;
+        allow create: if docId == 'current'
+          && isAdmin()
+          && request.resource.data.keys().hasOnly(['castCount'])
+          && request.resource.data.castCount is int
+          && request.resource.data.castCount >= 0;
+        allow update: if docId == 'current' && (
+          isAdmin()
+            && request.resource.data.keys().hasOnly(['castCount'])
+            && request.resource.data.castCount is int
+            && request.resource.data.castCount >= resource.data.castCount
+          || progressBallotOk(pollId)
+        );
+        allow delete: if false;
+      }
 
       match /tally/{docId} {
         allow read: if docId == 'current'
@@ -335,14 +427,14 @@ service cloud.firestore {
           isAdmin()
             && request.resource.data.keys().hasOnly(['counts'])
             && request.resource.data.counts is map
-          || isVoter() && voterBallotOk(pollId)
+          || tallyBallotOk(pollId)
         );
         allow delete: if false;
       }
 
       match /voteGuards/{uid} {
         allow read: if false;
-        allow create: if uid == request.auth.uid && voterBallotOk(pollId);
+        allow create: if uid == request.auth.uid && guardBallotOk(pollId);
         allow update, delete: if false;
       }
 
@@ -356,11 +448,11 @@ service cloud.firestore {
             && request.resource.data.status == 'pending'
             && request.resource.data.voterName is string
             && request.resource.data.createdAt is number
-          || isVoter() && voterBallotOk(pollId) && request.resource.data.voterId == voterId;
+          || partBallotOk(pollId) && request.resource.data.voterId == voterId;
         allow update: if isAdmin()
             && participantShape(request.resource.data)
             && request.resource.data.voterId == voterId
-          || isVoter() && voterBallotOk(pollId) && request.resource.data.voterId == voterId;
+          || partBallotOk(pollId) && request.resource.data.voterId == voterId;
         allow delete: if isAdmin() && resource.data.status != 'completed';
       }
     }

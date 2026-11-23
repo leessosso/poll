@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePolls } from '../hooks/usePolls';
-import { usePresence } from '../hooks/usePresence';
 import { useVoterAuth } from '../hooks/useVoterAuth';
 import { useRosterClaim } from '../hooks/useRosterClaim';
 import { useVote } from '../hooks/useVote';
@@ -43,7 +42,6 @@ export default function VoterPage() {
 function VoterScreen() {
   const { sessionId } = useParams();
   const { polls, loading } = usePolls('voter', { tallyScope: 'none' });
-  usePresence();
   const { session, loading: sessionLoading, error: sessionError } = useVoterSession(sessionId);
   const { claim, ready: claimReady, meetingOpen, clearedStaleClaim, saveClaim, clearClaim } = useRosterClaim();
   const { votingFor, error: voteError, handleVote } = useVote();
