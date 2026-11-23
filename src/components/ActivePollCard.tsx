@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { getOptions, hasVoted } from '../lib/poll-utils';
 import type { Poll } from '../types';
 import PollCountdown from './PollCountdown';
-import { QuorumProgress } from './PollDecisionBadge';
 import VoteConfirmModal from './VoteConfirmModal';
 
 interface ActivePollCardProps {
@@ -40,7 +39,6 @@ export default function ActivePollCard({
         <h2 className="text-xl font-bold text-gray-800 mb-4">{poll.title}</h2>
         <div className="mb-4 space-y-3">
           <PollCountdown poll={poll} />
-          <QuorumProgress poll={poll} />
         </div>
 
         {voted ? (

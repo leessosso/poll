@@ -38,7 +38,6 @@ export default function PollAdminCard({ poll }: PollAdminCardProps) { ... }
 // GOOD - VoterPage.tsx
 export default function VoterPage() {
   const polls = usePolls();
-  usePresence();
   const { handleVote, votingFor } = useVote();
   // 렌더링만
 }

@@ -1,18 +1,14 @@
 import { formatKstTime } from '../lib/kst-date';
 
 interface AdminHeadcountBadgeProps {
-  visitorCount: number;
-  presenceCount: number;
   checkinCount: number;
   refreshing: boolean;
   updatedAt: number | null;
   onRefresh: () => void;
 }
 
-/** 관리자 헤더의 방문·접속·입장 인원. 실시간으로도 바뀌고, 버튼으로 다시 불러올 수 있다. */
+/** 관리자 헤더의 이번 모임 입장 수. 버튼으로 다시 불러올 수 있다. */
 export default function AdminHeadcountBadge({
-  visitorCount,
-  presenceCount,
   checkinCount,
   refreshing,
   updatedAt,
@@ -20,10 +16,7 @@ export default function AdminHeadcountBadge({
 }: AdminHeadcountBadgeProps) {
   return (
     <div className="flex flex-wrap items-center gap-2 bg-white/15 rounded-full px-3 py-1">
-      <span className="w-2 h-2 bg-accent rounded-full animate-pulse shrink-0" aria-hidden />
-      <span className="text-sm font-medium">
-        오늘 방문 {visitorCount}명 · 접속 {presenceCount}명 · 이번 모임 입장 {checkinCount}명
-      </span>
+      <span className="text-sm font-medium">이번 모임 입장 {checkinCount}명</span>
       <button
         type="button"
         onClick={onRefresh}

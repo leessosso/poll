@@ -46,7 +46,7 @@ export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
 }
 ```
 
-## RTDB Presence 로직은 훅으로 분리
+## Realtime Database 는 쓰지 않는다
 
-방문자 추적 / presence 등록 로직은 `src/hooks/usePresence.ts`로 분리한다.
-컴포넌트에서는 `usePresence()` 한 줄만 호출한다.
+접속·방문 집계는 없다. 관리자 배지는 이번 모임 입장(`checkins`) 수다.
+`getDatabase` 를 호출하지 않는다. 투표 중 오르는 총원은 `polls/{id}/progress/current` 에만 두고, 투표자 구독은 걸지 않는다.

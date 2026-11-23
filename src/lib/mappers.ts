@@ -18,6 +18,7 @@ export function mapPoll(doc: QueryDocumentSnapshot<DocumentData>): Poll {
     createdAt: data.createdAt ?? 0,
     // 레거시 results 필드는 투표 문서에 남아 있어도 화면에 올리지 않는다.
     results: {},
+    // 진행 중 총원은 progress 문서에 있다. 여기 값은 마감 후 또는 예전 투표의 총원이다.
     castCount: typeof data.castCount === 'number' ? data.castCount : 0,
     expectedCount: typeof data.expectedCount === 'number' ? data.expectedCount : undefined,
     showResults: data.showResults ?? false,

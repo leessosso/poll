@@ -14,7 +14,11 @@ export interface Poll {
   createdAt: number;
   /** 클라이언트에서 tally/current 를 읽어 채운다. 투표 문서에는 저장하지 않는다. */
   results: Record<string, number>;
-  /** 선택지를 드러내지 않는 참여 총원. 정족수 진행률에 쓴다. */
+  /**
+   * 선택지를 드러내지 않는 참여 총원.
+   * 진행 중 값은 polls/{id}/progress/current 에만 있고, 관리자 화면이 그 값을 여기에 덮어쓴다.
+   * 투표 문서의 castCount 는 마감 때 굳히거나, 예전 투표에 남아 있는 값이다.
+   */
   castCount: number;
   showResults: boolean;
   eligibilityMode: EligibilityMode;

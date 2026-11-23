@@ -99,6 +99,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
         batch.set(doc(db, 'polls', pollRef.id, 'tally', 'current'), {
           counts: Object.fromEntries(finalOptions.map((option) => [option, 0])),
         });
+        batch.set(doc(db, 'polls', pollRef.id, 'progress', 'current'), { castCount: 0 });
         applyBoardMode(batch, 'results');
         await batch.commit();
       }
