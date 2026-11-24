@@ -14,21 +14,19 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { applyBoardMode } from './board-state';
+import {
+  BadgeTakenError,
+  CLAIM_REJECTED,
+  badgeInRange,
+  isPermissionDenied,
+  takeFreeBadge,
+} from './claim-badge';
 import { MEETING_PUBLIC_DOC, ROOM_CODE_LENGTH, checkinId, entryCodeHash, lampId } from './meeting';
 import { getDefaultDurationSeconds, getOptions } from './poll-utils';
 import type { AttendanceSession, Poll, RosterClaim, Voter, VoterSession } from '../types';
 
 const DEFAULT_EVENT_ID = 'elder-vote';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const BADGE_MIN = 100;
-const BADGE_MAX = 999;
-
-class BadgeTakenError extends Error {
-  constructor() {
-    super('입장 번호가 겹쳤습니다.');
-    this.name = 'BadgeTakenError';
-  }
-}
 
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
@@ -63,34 +61,7 @@ async function requireMeetingId(): Promise<string> {
 
 function badgeOf(data: Record<string, unknown> | undefined): number | null {
   const badge = data?.badge;
-  return typeof badge === 'number' && Number.isInteger(badge) && badge >= BADGE_MIN && badge <= BADGE_MAX
-    ? badge
-    : null;
-}
-
-function pickRandomUntriedBadge(tried: Set<number>): number {
-  const span = BADGE_MAX - BADGE_MIN + 1;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const badge = BADGE_MIN + Math.floor(Math.random() * span);
-    if (!tried.has(badge)) return badge;
-  }
-  for (let badge = BADGE_MIN; badge <= BADGE_MAX; badge += 1) {
-    if (!tried.has(badge)) return badge;
-  }
-  throw new Error('입장 번호를 더 만들 수 없습니다.');
-}
-
-function pickBadge(used: Set<number>): number {
-  const span = BADGE_MAX - BADGE_MIN + 1;
-  if (used.size >= span) throw new Error('입장 번호를 더 만들 수 없습니다.');
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const badge = BADGE_MIN + Math.floor(Math.random() * span);
-    if (!used.has(badge)) return badge;
-  }
-  for (let badge = BADGE_MIN; badge <= BADGE_MAX; badge += 1) {
-    if (!used.has(badge)) return badge;
-  }
-  throw new Error('입장 번호를 더 만들 수 없습니다.');
+  return badgeInRange(badge) ? badge : null;
 }
 
 async function commitOps(ops: Array<(batch: WriteBatch) => void>): Promise<void> {
@@ -107,10 +78,7 @@ function emptyCounts(poll: Poll): Record<string, number> {
 }
 
 function permissionError(err: unknown, fallback: string): Error {
-  const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
-  if (code === 'permission-denied' || code === 'firestore/permission-denied') {
-    return new Error(fallback);
-  }
+  if (isPermissionDenied(err)) return new Error(fallback);
   return err instanceof Error ? err : new Error(fallback);
 }
 
@@ -383,9 +351,6 @@ export async function togglePollResults(poll: Poll): Promise<void> {
   await updateDoc(doc(db, 'polls', poll.id), { showResults: !poll.showResults });
 }
 
-const CLAIM_REJECTED =
-  '입장하지 못했습니다. 화면의 입장 코드를 다시 확인해 주세요. 이미 입장한 기기라면 새로고침해 주세요.';
-
 function claimFromCheckinDoc(data: Record<string, unknown>): RosterClaim | null {
   const { meetingId, voterId, voterName, claimToken } = data;
   if (typeof meetingId !== 'string' || typeof voterId !== 'string') return null;
@@ -402,6 +367,7 @@ function claimFromCheckinDoc(data: Record<string, unknown>): RosterClaim | null 
 /**
  * 코드만으로 현장 입장. 입장 코드는 규칙이 해시 문서로 확인한다.
  * 명단을 읽지 않고, 무작위 번호를 트랜잭션으로 확인해 읽기 수를 최소화한다.
+ * 같은 번호를 동시에 집으면 규칙이 permission-denied 로 거절하므로, 칸이 찼을 때만 새 번호로 다시 시도한다.
  */
 export async function claimRosterSeat(roomCode: string): Promise<RosterClaim> {
   const meetingId = await requireMeetingId();
@@ -415,63 +381,48 @@ export async function claimRosterSeat(roomCode: string): Promise<RosterClaim> {
   const checkinDocRef = doc(db, 'checkins', checkinId(meetingId, uid));
 
   try {
-    const tried = new Set<number>();
-    let used: Set<number> | null = null;
-    let lastError: unknown;
-    const MAX_RANDOM_TRIES = 12;
-
-    for (let attempt = 0; attempt < MAX_RANDOM_TRIES + 4; attempt += 1) {
-      if (attempt === MAX_RANDOM_TRIES && !used) {
-        used = new Set<number>(tried);
+    return await takeFreeBadge({
+      loadHeldBadges: async () => {
         const existing = await getDocs(query(collection(db, 'lamps'), where('meetingId', '==', meetingId)));
+        const badges: number[] = [];
         existing.docs.forEach((lampDoc) => {
-          const b = badgeOf(lampDoc.data());
-          if (b) used!.add(b);
+          const badge = badgeOf(lampDoc.data());
+          if (badge) badges.push(badge);
         });
-      }
-
-      const badge = used ? pickBadge(used) : pickRandomUntriedBadge(tried);
-      tried.add(badge);
-
-      try {
-        const result = await runTransaction(db, async (tx) => {
-          const [checkinSnap, seatSnap] = await Promise.all([
-            tx.get(checkinDocRef),
-            tx.get(lampRef(meetingId, badge)),
-          ]);
-          if (checkinSnap.exists() && checkinSnap.data().revoked === false) {
-            const existingClaim = claimFromCheckinDoc(checkinSnap.data());
-            if (existingClaim) return existingClaim;
-          }
-          if (seatSnap.exists()) throw new BadgeTakenError();
-          const voterName = `${badge}번`;
-          tx.set(checkinDocRef, {
-            meetingId,
-            voterId: uid,
-            voterName,
-            claimedAt: Date.now(),
-            claimToken,
-            authUid: uid,
-            badge,
-            codeHash,
-            revoked: false,
-          });
-          tx.set(lampRef(meetingId, badge), {
-            meetingId,
-            badge,
-            state: 'seated',
-            pollId: '',
-          });
-          return { meetingId, voterId: uid, voterName, claimToken, badge };
+        return badges;
+      },
+      isBadgeHeld: async (badge) => (await getDoc(lampRef(meetingId, badge))).exists(),
+      runAttempt: (badge) => runTransaction(db, async (tx) => {
+        const [checkinSnap, seatSnap] = await Promise.all([
+          tx.get(checkinDocRef),
+          tx.get(lampRef(meetingId, badge)),
+        ]);
+        if (checkinSnap.exists() && checkinSnap.data().revoked === false) {
+          const existingClaim = claimFromCheckinDoc(checkinSnap.data());
+          if (existingClaim) return existingClaim;
+        }
+        if (seatSnap.exists()) throw new BadgeTakenError();
+        const voterName = `${badge}번`;
+        tx.set(checkinDocRef, {
+          meetingId,
+          voterId: uid,
+          voterName,
+          claimedAt: Date.now(),
+          claimToken,
+          authUid: uid,
+          badge,
+          codeHash,
+          revoked: false,
         });
-        return result;
-      } catch (err) {
-        if (!(err instanceof BadgeTakenError)) throw err;
-        if (used) used.add(badge);
-        lastError = err;
-      }
-    }
-    throw lastError instanceof Error ? lastError : new Error('입장 번호를 정하지 못했습니다.');
+        tx.set(lampRef(meetingId, badge), {
+          meetingId,
+          badge,
+          state: 'seated',
+          pollId: '',
+        });
+        return { meetingId, voterId: uid, voterName, claimToken, badge };
+      }),
+    });
   } catch (err) {
     throw permissionError(err, CLAIM_REJECTED);
   }
