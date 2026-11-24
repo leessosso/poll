@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test:rules": "firebase emulators:exec --only firestore,database --project demo-dcc-poll \"node --test --test-timeout 30000 tests/rules.test.mjs\"",
-    "test": "node --test tests/board-fit.test.mjs tests/board-state.test.mjs tests/emergency-admin.test.mjs tests/kst-date.test.mjs tests/org.test.mjs tests/voter-entry-url.test.mjs",
+    "test": "node --test tests/board-fit.test.mjs tests/board-state.test.mjs tests/claim-badge.test.mjs tests/emergency-admin.test.mjs tests/kst-date.test.mjs tests/org.test.mjs tests/voter-entry-url.test.mjs",
     "sim:fanout": "firebase emulators:exec --only firestore --project demo-cost-sim \"node scripts/sim-fanout.mjs before\" && firebase emulators:exec --only firestore --project demo-cost-sim \"node scripts/sim-fanout.mjs after\"",
     "preview": "vite preview",
     "predeploy": "npm run build",
