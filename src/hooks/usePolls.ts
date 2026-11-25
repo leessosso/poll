@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { usePageVisibleGeneration } from './usePageVisible';
-import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { getTodayKST } from '../lib/kst-date';
+import { getTodayKST, kstMidnightMs, msUntilNextKstMidnight } from '../lib/kst-date';
 import { mapPoll } from '../lib/mappers';
 import type { Poll } from '../types';
 
@@ -37,6 +37,7 @@ export function usePolls(
   const [tallies, setTallies] = useState<Record<string, Record<string, number>>>({});
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [kstDay, setKstDay] = useState(() => getTodayKST());
   const tallyKey = polls
     .filter((poll) => tallyVisible(poll, audience, tallyScope))
     .map((poll) => poll.id)
@@ -44,14 +45,58 @@ export function usePolls(
     .join(',');
   const progressKey = audience === 'admin' ? polls.map((poll) => poll.id).sort().join(',') : '';
 
+  // 투표자 화면과 현황판은 KST 자정이 지나면 오늘 기준으로 다시 구독한다.
   useEffect(() => {
-    const base = query(collection(db, 'polls'), orderBy('createdAt', 'desc'));
-    const pollQuery = audience === 'voter' ? query(base, limit(25)) : base;
-    return onSnapshot(pollQuery, (snap) => {
-      setPolls(snap.docs.map(mapPoll));
+    if (audience !== 'voter') return;
+    const id = window.setTimeout(() => setKstDay(getTodayKST()), msUntilNextKstMidnight());
+    return () => window.clearTimeout(id);
+  }, [audience, kstDay]);
+
+  useEffect(() => {
+    if (audience === 'admin') {
+      return onSnapshot(query(collection(db, 'polls'), orderBy('createdAt', 'desc')), (snap) => {
+        setPolls(snap.docs.map(mapPoll));
+        setLoading(false);
+      });
+    }
+    // 투표자 화면과 현황판은 지난 투표를 읽지 않는다. 두 구독은 겹치지 않아 같은 문서를 두 번 읽지 않는다.
+    // - 대기·진행 중인 투표(언제 만들었든). 마감은 되돌릴 수 없어 closed 는 여기서 빠진다.
+    // - 오늘(KST) 마감한 투표. closedAt 은 마감 때만 쓰인다.
+    // 화면의 오늘 판정(isSameKstDay)에 걸리는 투표는 모두 이 둘 중 하나에 들어간다.
+    // 여러 필드 범위를 or 로 묶으면 그 필드가 없는 문서(진행 중 투표의 closedAt)가 빠지므로 쓰지 않는다.
+    const since = kstMidnightMs(kstDay);
+    let openDocs: Poll[] = [];
+    let closedDocs: Poll[] = [];
+    let openReady = false;
+    let closedReady = false;
+    const publish = () => {
+      if (!openReady || !closedReady) return;
+      const next = [...openDocs, ...closedDocs];
+      next.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      setPolls(next);
       setLoading(false);
-    });
-  }, [audience, visibleGeneration]);
+    };
+    const unsubOpen = onSnapshot(
+      query(collection(db, 'polls'), where('status', 'in', ['waiting', 'active'])),
+      (snap) => {
+        openDocs = snap.docs.map(mapPoll);
+        openReady = true;
+        publish();
+      },
+    );
+    const unsubClosed = onSnapshot(
+      query(collection(db, 'polls'), where('closedAt', '>=', since)),
+      (snap) => {
+        closedDocs = snap.docs.map(mapPoll).filter((poll) => poll.status === 'closed');
+        closedReady = true;
+        publish();
+      },
+    );
+    return () => {
+      unsubOpen();
+      unsubClosed();
+    };
+  }, [audience, visibleGeneration, kstDay]);
 
   useEffect(() => {
     if (!tallyKey) return;

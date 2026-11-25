@@ -1,4 +1,4 @@
-import { useBoardAccess } from '../hooks/useBoardLamps';
+import { useBoardAccess, useBoardLamps } from '../hooks/useBoardLamps';
 import VoteBoard from '../components/VoteBoard';
 
 export default function BoardPage() {
@@ -20,5 +20,11 @@ export default function BoardPage() {
     );
   }
 
-  return <VoteBoard layout="screen" />;
+  return <BoardScreen />;
+}
+
+/** 익명 로그인이 끝난 뒤에만 번호를 구독한다. */
+function BoardScreen() {
+  const boardLamps = useBoardLamps();
+  return <VoteBoard layout="screen" boardLamps={boardLamps} />;
 }

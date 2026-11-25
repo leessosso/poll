@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAdminAuth } from '../hooks/useAdminAuth';
-import { useBoardLamps } from '../hooks/useBoardLamps';
+import type { UseBoardLampsResult } from '../hooks/useBoardLamps';
 import { useBoardState } from '../hooks/useBoardState';
 import { usePolls } from '../hooks/usePolls';
 import { isBoardStandby, setBoardMode } from '../lib/board-state';
@@ -11,11 +11,13 @@ import VoteBoardView from './VoteBoardView';
 
 interface VoteBoardProps {
   layout?: 'screen' | 'panel';
+  /** 현황판 번호 구독 결과. 관리자 화면은 같은 구독을 참여 현황과 나눠 쓴다. */
+  boardLamps: UseBoardLampsResult;
 }
 
-export default function VoteBoard({ layout = 'screen' }: VoteBoardProps) {
+export default function VoteBoard({ layout = 'screen', boardLamps }: VoteBoardProps) {
   const { polls, loading: pollsLoading } = usePolls('voter', { tallyScope: 'today' });
-  const { lamps, loading: lampsLoading, error } = useBoardLamps();
+  const { lamps, loading: lampsLoading, error } = boardLamps;
   const { mode, updatedAt } = useBoardState();
   const { ready, isAdmin } = useAdminAuth();
   const [saving, setSaving] = useState(false);

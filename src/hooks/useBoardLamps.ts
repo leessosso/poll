@@ -5,7 +5,7 @@ import { ensureVoterUser } from '../lib/voter-auth';
 import { useCurrentMeeting } from './useCurrentMeeting';
 import type { BoardLamp } from '../types';
 
-interface UseBoardLampsResult {
+export interface UseBoardLampsResult {
   lamps: BoardLamp[];
   loading: boolean;
   error: string | null;

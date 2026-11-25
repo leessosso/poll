@@ -7,6 +7,11 @@ export function getTodayKST(now = Date.now()): string {
   return new Date(now + KST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/** KST 날짜(YYYY-MM-DD)의 자정 시각(ms). */
+export function kstMidnightMs(day: string): number {
+  return Date.parse(`${day}T00:00:00.000Z`) - KST_OFFSET_MS;
+}
+
 /** 다음 KST 자정까지 남은 밀리초. 방문 구독 경로를 날짜가 바뀌면 다시 걸 때 쓴다. */
 export function msUntilNextKstMidnight(now = Date.now()): number {
   const today = getTodayKST(now);
