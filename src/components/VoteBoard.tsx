@@ -16,7 +16,7 @@ interface VoteBoardProps {
 }
 
 export default function VoteBoard({ layout = 'screen', boardLamps }: VoteBoardProps) {
-  const { polls, loading: pollsLoading } = usePolls('voter', { tallyScope: 'today' });
+  const { polls, loading: pollsLoading } = usePolls('voter', { tallyScope: 'today', liveClosed: true });
   const { lamps, loading: lampsLoading, error } = boardLamps;
   const { mode, updatedAt } = useBoardState();
   const { ready, isAdmin } = useAdminAuth();
