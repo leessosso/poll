@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatKstTime, getTodayKST, msUntilNextKstMidnight } from '../src/lib/kst-date.ts';
+import { formatKstTime, getTodayKST, kstMidnightMs, msUntilNextKstMidnight } from '../src/lib/kst-date.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -20,4 +20,10 @@ test('다음 KST 자정까지 남은 시간을 계산한다', () => {
 test('KST 시각은 HH:MM 이다', () => {
   assert.equal(formatKstTime(Date.parse('2026-11-11T13:37:00.000Z')), '22:37');
   assert.equal(formatKstTime(Date.parse('2026-11-11T15:00:00.000Z')), '00:00');
+});
+
+test('KST 날짜의 자정은 전날 15:00 UTC 이다', () => {
+  assert.equal(kstMidnightMs('2026-11-29'), Date.parse('2026-11-28T15:00:00.000Z'));
+  assert.equal(getTodayKST(kstMidnightMs('2026-11-29')), '2026-11-29');
+  assert.equal(getTodayKST(kstMidnightMs('2026-11-29') - 1), '2026-11-28');
 });

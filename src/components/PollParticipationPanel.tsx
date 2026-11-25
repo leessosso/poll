@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { usePollParticipation } from '../hooks/usePollParticipation';
+import { usePollParticipation, type SharedBoardLamps } from '../hooks/usePollParticipation';
 import type { Poll } from '../types';
 
 interface PollParticipationPanelProps {
   poll: Poll;
+  /** 관리자 화면의 현황판 번호. 있으면 현장 입장 투표는 participation 을 따로 구독하지 않는다. */
+  boardLamps?: SharedBoardLamps;
 }
 
-export default function PollParticipationPanel({ poll }: PollParticipationPanelProps) {
-  const { pending, completed, participants, loading } = usePollParticipation(poll);
+export default function PollParticipationPanel({ poll, boardLamps }: PollParticipationPanelProps) {
+  const { pending, completed, participants, loading } = usePollParticipation(poll, boardLamps);
   const [showCompleted, setShowCompleted] = useState(false);
   const total = participants.length;
   const completedCount = completed.length;

@@ -631,6 +631,24 @@ describe('firestore rules', () => {
     await assertSucceeds(getDocs(collection(voter(), 'polls')));
     await assertFails(getDocs(collection(unauth(), 'polls')));
   });
+
+  test('투표자 화면의 오늘·진행 중 투표 쿼리는 지난 마감 투표를 빼고 읽힌다', async () => {
+    const since = Date.parse('2026-11-28T15:00:00.000Z');
+    await seed(async (db) => {
+      await setDoc(doc(db, 'polls/old'), pollData({ status: 'closed', createdAt: since - 86400000, startedAt: since - 86000000, closedAt: since - 85000000 }));
+      await setDoc(doc(db, 'polls/waitingOld'), pollData({ status: 'waiting', createdAt: since - 86400000 }));
+      await setDoc(doc(db, 'polls/today'), pollData({ status: 'closed', createdAt: since + 1000, startedAt: since + 2000, closedAt: since + 3000 }));
+      await setDoc(doc(db, 'polls/startedToday'), pollData({ status: 'closed', createdAt: since - 1000, startedAt: since + 5000, closedAt: since + 6000 }));
+    });
+    const openQuery = (db) => query(collection(db, 'polls'), where('status', 'in', ['waiting', 'active']));
+    const closedTodayQuery = (db) => query(collection(db, 'polls'), where('closedAt', '>=', since));
+    const open = await assertSucceeds(getDocs(openQuery(voter())));
+    const closed = await assertSucceeds(getDocs(closedTodayQuery(voter())));
+    assert.deepEqual(open.docs.map((d) => d.id).sort(), ['waitingOld']);
+    assert.deepEqual(closed.docs.map((d) => d.id).sort(), ['startedToday', 'today']);
+    await assertFails(getDocs(openQuery(unauth())));
+    await assertFails(getDocs(closedTodayQuery(unauth())));
+  });
 });
 
 describe('realtime database rules', () => {

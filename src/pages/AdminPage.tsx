@@ -32,6 +32,7 @@ import VoteBoard from '../components/VoteBoard';
 import VoterRosterPanel from '../components/VoterRosterPanel';
 import { finalizePoll, startPollWithParticipation, togglePollResults } from '../lib/vote-service';
 import { useMeetingCheckins } from '../hooks/useMeetingCheckins';
+import { useBoardLamps } from '../hooks/useBoardLamps';
 import AdminHeadcountBadge from '../components/AdminHeadcountBadge';
 import HeadcountPanel, { StartHeadcountDialog } from '../components/HeadcountPanel';
 
@@ -222,6 +223,8 @@ function EmergencyLogin() {
 
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const { polls } = usePolls('admin');
+  // 현황판 칸과 참여 현황은 같은 번호 데이터를 한 번만 구독해 나눠 쓴다.
+  const boardLamps = useBoardLamps();
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
@@ -343,12 +346,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               onToggleResults={toggleResults}
             />
             <div className="mt-3">
-              <PollParticipationPanel poll={activePoll} />
+              <PollParticipationPanel poll={activePoll} boardLamps={boardLamps} />
             </div>
           </section>
         )}
 
-        <VoteBoard layout="panel" />
+        <VoteBoard layout="panel" boardLamps={boardLamps} />
 
         <VoterRosterPanel eventId={activePoll?.eventId || 'elder-vote'} activePoll={activePoll ?? null} checkins={checkins} />
 
