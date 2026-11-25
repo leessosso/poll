@@ -20,7 +20,7 @@ export default function CreatePollForm({ onClose, editPoll }: CreatePollFormProp
   const [allowAbstain, setAllowAbstain] = useState(editPoll?.allowAbstain ?? true);
   const [eventId, setEventId] = useState(editPoll?.eventId ?? 'elder-vote');
   const [durationMinutes, setDurationMinutes] = useState(
-    Math.max(1, Math.round((editPoll?.durationSeconds ?? 180) / 60)),
+    Math.max(1, Math.round((editPoll?.durationSeconds ?? 120) / 60)),
   );
   const [options, setOptions] = useState<string[]>(
     editPoll?.type === 'choice' ? editPoll.options : ['', '']
