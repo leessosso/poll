@@ -18,7 +18,7 @@ export function isPollExpired(poll: Poll, now = Date.now()): boolean {
 }
 
 export function getDefaultDurationSeconds(poll: Partial<Poll>): number {
-  return poll.durationSeconds ?? 180;
+  return poll.durationSeconds ?? 120;
 }
 
 export function hasVoted(pollId: string): boolean {
